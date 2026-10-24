@@ -154,3 +154,6 @@ body { overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
 .ls-lbl { min-width: 190px; font-size: 14px; }
 .points-filters .search { flex: 1 1 100%; }
 .points-filters select.input { width: auto; flex: 1 1 110px; min-width: 110px; }
+
+.poi-badge { position: absolute; left: 12px; top: 12px; background: #fff; border: 1px solid var(--border, #CFC9C0); border-radius: 18px; padding: 6px 14px; font-size: 14px; font-weight: 700; color: #2f9e4a; z-index: 6; box-shadow: 0 2px 8px rgba(0,0,0,.12); }
+.mode-model .poi-badge, .plan-page .view-switch ~ .poi-badge { top: 64px; }

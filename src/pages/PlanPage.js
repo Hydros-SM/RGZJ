@@ -8,7 +8,8 @@ import { makeRaster } from '../lib/raster.js';
 import { PlanCanvas } from '../components/PlanCanvas.js';
 import { Scene3D } from '../components/Scene3D.js';
 import { InfoSheet } from '../components/InfoSheet.js';
-import { PointsSettings, FaultsSettings, TerrainSettings } from '../components/LayerSettings.js';
+import { PointsSettings, FaultsSettings, TerrainSettings, PoiSettings } from '../components/LayerSettings.js';
+import { computePoi } from '../lib/session.js';
 
 function useImage(url) {
   const [img, setImg] = useState(null);
@@ -24,7 +25,7 @@ const ls = (key, def) => { try { return { ...def, ...JSON.parse(localStorage.get
 const lsSet = (key, v) => { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) { /* не критично */ } };
 
 // mode: 'map' | 'model'
-const GEAR = { points: 'points', outflows: 'points', faults2d: 'faults', faults3d: 'faults', faultSurf: 'faults', faultAir: 'faults', faultLines: 'faults', terrain: 'terrain', contours: 'terrain' };
+const GEAR = { points: 'points', poi: 'poi', outflows: 'points', faults2d: 'faults', faults3d: 'faults', faultSurf: 'faults', faultAir: 'faults', faultLines: 'faults', terrain: 'terrain', contours: 'terrain' };
 
 export function PlanPage({ session, mode, focusRequest, placing, onStart, onPlace, onCancelPlace, vs, setVs, onReady }) {
   const [layers, setLayers] = useState(() => ls('field-layers-' + mode, mode === 'map' ? { ...DEFAULT_LAYERS, faults2d: true, faults3d: false } : DEFAULT_LAYERS));
@@ -64,7 +65,8 @@ export function PlanPage({ session, mode, focusRequest, placing, onStart, onPlac
       : selected.kind === 'outflow' ? session.outflows.find((o) => o.id === it.id) : null;
     return fresh && fresh !== it ? { ...selected, item: fresh } : selected;
   }, [selected, session.points, session.outflows]);
-  const overlay = { data: session.data, layers, points: session.points, outflows: session.outflows, traces: session.traces, faults: session.faults, fview: vs.faults, selected: live };
+  const poi = useMemo(() => (mode === 'map' || !is3d ? computePoi(session, vs.poi) : null), [session.data, session.points, session.manifest, vs.poi, mode, is3d]);
+  const overlay = { poi, data: session.data, layers, points: session.points, outflows: session.outflows, traces: session.traces, faults: session.faults, fview: vs.faults, selected: live };
   const select = (p) => {
     if (!p) { setSelected(null); return; }
     if (p.kind === 'fault') setSelected({ kind: 'fault', key: p.key });
@@ -101,6 +103,8 @@ export function PlanPage({ session, mode, focusRequest, placing, onStart, onPlac
         </div>`}
         <button class="fab-main" onClick=${() => setFab((v) => !v)}><${Plus} size=${22} /> Записать</button>
       </div>`}
+      <${PoiSettings} open=${dlg === 'poi'} onClose=${() => setDlg('')} session=${session} vs=${vs} setVs=${setVs} poi=${poi} />
+      ${!is3d && layers.poi && poi && html`<div class="poi-badge" title="Точки интереса: перемерено / всего">✓ ${poi.doneCount} / ${poi.total}</div>`}
       <${PointsSettings} open=${dlg === 'points'} onClose=${() => setDlg('')} session=${session} vs=${vs} setVs=${setVs} />
       <${TerrainSettings} open=${dlg === 'terrain'} onClose=${() => setDlg('')} session=${session} vs=${vs} setVs=${setVs} />
       <${FaultsSettings} open=${dlg === 'faults'} onClose=${() => setDlg('')} session=${session} vs=${vs} setVs=${setVs} />

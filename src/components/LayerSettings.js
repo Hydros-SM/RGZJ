@@ -95,3 +95,27 @@ export function TerrainSettings({ open, onClose, session, vs: view, setVs: setVi
       </div>
     <//>`;
 }
+
+export function PoiSettings({ open, onClose, session, vs: view, setVs: setView, poi }) {
+  const cfg = view.poi, D = session.data, hasInterest = Array.isArray(D.interest);
+  const set = (patch) => setView({ ...view, poi: { ...cfg, ...patch } });
+  const wk = session.manifest.scheme && session.manifest.scheme.weekKey;
+  return html`
+    <${Dialog} open=${open} onClose=${onClose} title="Точки интереса" width="min(560px, 96vw)" footer=${html`<${Button} variant="outline" onClick=${() => set({ scope: 'interest', date: '__all__' })}>Сбросить<//><${Button} onClick=${onClose}>Готово<//>`}>
+      <div class="ls-hint" style=${{ marginBottom: '12px' }}>Белые кружки с номерами показывают, какие точки нужно перемерить. Серый — ещё не перемерена, зелёный — перемерена (в том числе замером, сделанным на планшете).</div>
+      <div class="ls-block">
+        <b>Какие точки</b>
+        <label class="ls-opt"><input type="radio" name="poiscope" checked=${cfg.scope !== 'all' || !hasInterest} onChange=${() => set({ scope: 'interest' })} /> ${hasInterest ? 'Выбранные при подготовке пакета (' + D.interest.length + ')' : 'Все точки пакета'}</label>
+        <label class="ls-opt"><input type="radio" name="poiscope" checked=${cfg.scope === 'all' && hasInterest} disabled=${!hasInterest} onChange=${() => set({ scope: 'all' })} /> Все точки реестра, что есть в пакете</label>
+      </div>
+      <div class="ls-block">
+        <b>Опорная дата</b>
+        <select class="input" value=${cfg.date || '__all__'} onChange=${(e) => set({ date: e.target.value })}>
+          <option value="__all__">Все точки реестра (последние замеры)</option>
+          ${(poi ? poi.dates : []).map((d) => html`<option key=${d} value=${d}>${fmtDate(d)}</option>`)}
+        </select>
+        <div class="ls-hint">${cfg.date === '__all__' || !cfg.date ? 'Выполненными считаются точки с замером на неделе схемы' + (wk ? ' (' + wk + ')' : '') + '.' : 'Показаны точки, замеренные в этот день. Выполненные — те, что перемерены позже.'}</div>
+      </div>
+      ${poi && html`<div class="ls-hint"><b>Сейчас: ✓ ${poi.doneCount} из ${poi.total}</b></div>`}
+    <//>`;
+}

@@ -4,7 +4,7 @@
 // понадобилось (сообщение cache-urls), и мы дозагружаем это в кэш: хватает ОДНОГО запуска с интернетом.
 // Все запросы SW к сети идут в обход HTTP-кэша браузера (GitHub Pages разрешает кэшировать файлы на 10 минут, и без этого обновление приложения
 // подтягивало бы устаревшие копии). Данные полевой работы лежат не здесь, а в IndexedDB (src/store.js) и в кэш не попадают.
-const VERSION = 'field-v5';
+const VERSION = 'field-v6';
 const SHELL = [
   './', './index.html', './manifest.webmanifest', './public/icon.svg',
   './src/main.js', './src/App.js', './src/store.js',

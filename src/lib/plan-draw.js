@@ -4,10 +4,10 @@ import { STATUS_COLORS } from './map-style.js';
 import { FAULT_GROUP_COLORS, WATER_CLASS_COLORS } from './faults-format.js';
 
 export const LAYERS = [
-  ['points', 'Точки замера'], ['outflows', 'Выходы воды'], ['domains', 'Домены'], ['faults2d', 'Разломы (линии карты)'], ['faults3d', 'Разломы 3D (линии выхода)'],
+  ['points', 'Точки замера'], ['poi', 'Точки интереса (что перемерить)'], ['outflows', 'Выходы воды'], ['domains', 'Домены'], ['faults2d', 'Разломы (линии карты)'], ['faults3d', 'Разломы 3D (линии выхода)'],
   ['piezo', 'Пьезометры'], ['sensors', 'Датчики'], ['observation', 'Наблюдательные скважины'], ['horizontal', 'Горизонтальные скважины'],
 ];
-export const DEFAULT_LAYERS = { points: true, outflows: true, domains: true, faults2d: false, faults3d: true, piezo: true, sensors: true, observation: true, horizontal: true };
+export const DEFAULT_LAYERS = { points: true, poi: false, outflows: true, domains: true, faults2d: false, faults3d: true, piezo: true, sensors: true, observation: true, horizontal: true };
 const INTENSITY_PX = { 'Слабая (капёж)': 4.5, 'Умеренная': 7, 'Сильная (поток)': 10.5, 'Очень сильная': 14 };
 export const OUTFLOW_COLOR = '#0e7490';
 
@@ -78,6 +78,17 @@ export function drawOverlay(ctx, cam, size, dpr, S) {
     ctx.save(); ctx.translate(o.x_local, o.y_local); ctx.rotate(Math.PI / 4); ctx.fillStyle = col; ctx.strokeStyle = sel ? '#f59e0b' : '#fff'; ctx.lineWidth = (sel ? 2.6 : 1.3) / k; ctx.beginPath(); ctx.rect(-r * 0.8, -r * 0.8, r * 1.6, r * 1.6); ctx.fill(); ctx.stroke(); ctx.restore();
     picks.push({ kind: 'outflow', item: o, x: o.x_local, y: o.y_local, rPx: 11 });
     if (k > 1.3) texts.push({ x: o.x_local, y: o.y_local, t: String(o.point_number).split('-').slice(1).join('-') || o.point_number, color: col, size: 10, dx: 9, dy: -6 });
+  });
+
+  // точки интереса (как на «Карте» основной платформы): белый кружок с номером; серый — ещё не перемерена, зелёный — выполнена
+  if (L.poi && S.poi) S.poi.items.forEach((p) => {
+    if (p.x_local == null || p.y_local == null) return;
+    const dn = S.poi.done[p.point_number], R = 10 / k;
+    ctx.save(); ctx.shadowColor = 'rgba(0,0,0,.4)'; ctx.shadowBlur = 3;
+    ctx.beginPath(); ctx.arc(p.x_local, p.y_local, R, 0, Math.PI * 2); ctx.fillStyle = 'rgba(255,255,255,.88)'; ctx.fill();
+    ctx.shadowBlur = 0; ctx.strokeStyle = dn ? 'rgba(52,168,83,.85)' : 'rgba(140,140,140,.8)'; ctx.lineWidth = 1.6 / k; ctx.stroke(); ctx.restore();
+    picks.push({ kind: 'point', item: p, x: p.x_local, y: p.y_local, rPx: 13 });
+    texts.push({ x: p.x_local, y: p.y_local, t: String(p.point_number), color: dn ? '#2f9e4a' : '#777', size: String(p.point_number).length > 3 ? 8 : 9, center: true, plain: true });
   });
 
   screen();

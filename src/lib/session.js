@@ -84,3 +84,35 @@ export function derivePoints(data, cfg) {
 }
 // Копия сессии с точками по настройкам (рельеф, разломы и rec те же — 3D-сцена не перестраивается)
 export function applyPointsView(session, cfg) { return { ...session, ...derivePoints(session.data, cfg) }; }
+
+// Неделя схемы '2026-W43' → { start, end } (понедельник–воскресенье, ISO-даты)
+export function weekRangeOf(weekKey) {
+  const m = /^(\d{4})-W(\d{1,2})$/.exec(weekKey || ''); if (!m) return null;
+  const y = Number(m[1]), w = Number(m[2]), jan4 = new Date(Date.UTC(y, 0, 4)), dow = (jan4.getUTCDay() + 6) % 7;
+  const mon = new Date(jan4.getTime() + ((w - 1) * 7 - dow) * 86400000), sun = new Date(mon.getTime() + 6 * 86400000), iso = (d) => d.toISOString().slice(0, 10);
+  return { start: iso(mon), end: iso(sun) };
+}
+
+// Точки интереса — что нужно (пере)мерить. date '__all__': последние записи всех точек, «выполнено» — замер на неделе схемы;
+// иначе точки, замеренные в выбранный день, «выполнено» — замер позже этого дня. Замеры, сделанные на планшете, считаются выполненными всегда.
+export function computePoi(session, cfg) {
+  const data = session.data, all = (data.points || []).filter((p) => p.kind !== 'outflow');
+  const interest = data.interest && cfg.scope !== 'all' ? new Set(data.interest.map(String)) : null;
+  const rows = all.filter((p) => !interest || interest.has(String(p.point_number)));
+  const day = (p) => String(p.monitoring_date || '').slice(0, 10);
+  const fieldNums = new Set(session.points.filter((p) => p._field && !p._edited).map((p) => p.point_number));
+  const latest = new Map();
+  const pick = (p) => { const c = latest.get(p.point_number); if (!c || day(p) > day(c)) latest.set(p.point_number, p); };
+  const done = {};
+  if (cfg.date === '__all__' || !cfg.date) {
+    rows.forEach(pick);
+    const wr = weekRangeOf(session.manifest.scheme && session.manifest.scheme.weekKey);
+    if (wr) rows.forEach((p) => { if (day(p) >= wr.start && day(p) <= wr.end) done[p.point_number] = true; });
+  } else {
+    rows.filter((p) => day(p) === cfg.date).forEach(pick);
+    rows.forEach((p) => { if (day(p) > cfg.date) done[p.point_number] = true; });
+  }
+  fieldNums.forEach((n) => { if (latest.has(n)) done[n] = true; });
+  const items = Array.from(latest.values()).map((p) => session.points.find((q) => q.point_number === p.point_number) || p);
+  return { items, done, total: items.length, doneCount: items.filter((p) => done[p.point_number]).length, dates: Array.from(new Set(all.map(day).filter(Boolean))).sort().reverse() };
+}
