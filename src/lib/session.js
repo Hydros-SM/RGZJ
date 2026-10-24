@@ -10,6 +10,16 @@ export const SUPPORTED = { format: 'gfield', version: 1 };
 
 export class NeedPassword extends Error { constructor(m) { super(m || 'Пакет защищён паролем'); this.needPassword = true; } }
 
+// Что не так с файлом, если он не открылся как пакет: пустой/обрезанный, не тот файл, неизвестный формат
+function diagnose(u8, why) {
+  const n = u8.length, mb = (n / 1048576).toFixed(2), head = String.fromCharCode(...u8.subarray(0, 8));
+  const size = 'Размер файла на планшете: ' + n.toLocaleString('ru-RU') + ' байт (' + mb + ' МБ). Сравните с размером исходного файла на компьютере: если они разные, файл не докопировался — скопируйте его заново.';
+  if (n < 100) return 'Файл пустой или скачан не полностью. ' + size;
+  if (/^s*</.test(head)) return 'Выбран не пакет, а веб-страница (HTML) — например, ссылка или страница облачного хранилища вместо файла. Скачайте сам файл .gfield. ' + size;
+  if (/^s*[{[]/.test(head)) return 'Выбран текстовый файл (JSON), а не пакет .gfield. ' + size;
+  if (u8[0] === 0x50 && u8[1] === 0x4b) return 'Архив обрезан или повреждён: начало файла верное, но конца нет (' + why + '). Скорее всего, файл не докопировался или изменился при передаче. ' + size;
+  return 'Это не полевой пакет (неизвестный формат файла). Выберите файл .gfield, собранный в основной платформе («Подготовка к полевым»). ' + size;
+}
 const exact = (u8) => u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
 
 // Читает файл пакета в запись для хранилища (ничего не сохраняя); бросает NeedPassword, если нужен пароль
@@ -20,7 +30,7 @@ export async function readPackageFile(file, password) {
     u8 = await decryptBytes(u8, password);
   }
   let z;
-  try { z = readZip(u8); } catch (e) { throw new Error('Файл не похож на полевой пакет: ' + e.message); }
+  try { z = readZip(u8); } catch (e) { throw new Error(diagnose(u8, e.message)); }
   if (!z.has('manifest.json')) throw new Error('В файле нет manifest.json — это не полевой пакет');
   const manifest = await z.json('manifest.json');
   if (manifest.format !== SUPPORTED.format) throw new Error('Неизвестный формат пакета: ' + manifest.format);
