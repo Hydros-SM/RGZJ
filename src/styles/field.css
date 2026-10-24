@@ -157,3 +157,6 @@ body { overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
 
 .poi-badge { position: absolute; left: 12px; top: 12px; background: #fff; border: 1px solid var(--border, #CFC9C0); border-radius: 18px; padding: 6px 14px; font-size: 14px; font-weight: 700; color: #2f9e4a; z-index: 6; box-shadow: 0 2px 8px rgba(0,0,0,.12); }
 .mode-model .poi-badge, .plan-page .view-switch ~ .poi-badge { top: 64px; }
+
+.upd-bar { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 200; background: #1f2937; color: #fff; border-radius: 28px; padding: 10px 12px 10px 20px; display: flex; align-items: center; gap: 14px; font-size: 15px; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
+.upd-bar button { min-height: 44px; padding: 0 20px; border: 0; border-radius: 22px; background: var(--gold-500, #B5851C); color: #fff; font-weight: 700; font-size: 15px; cursor: pointer; }
