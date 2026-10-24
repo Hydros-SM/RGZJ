@@ -63,6 +63,7 @@ export function PackagePage({ session, onSession }) {
             <div class="kv"><span>Версия основной платформы</span><b>${m.appVersion || '—'}</b></div>
             <div class="kv"><span>Загружен на планшет</span><b>${fmtDt(session.importedAt)}</b></div>
             <div class="kv"><span>Файл</span><b>${session.fileName || '—'}</b></div>
+            ${session.fileHash && html`<div class="kv"><span>Контрольная сумма SHA-256</span><b style=${{ fontFamily: 'var(--font-mono)', fontSize: '11px', wordBreak: 'break-all', maxWidth: '60%' }}>${session.fileHash}</b></div>`}
           </div>
           <div class="card pkg-card">
             <h3>Состав</h3>

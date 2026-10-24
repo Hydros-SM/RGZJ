@@ -27,6 +27,13 @@ async function pipe(u8, stream) {
 export const deflateRaw = (u8) => pipe(u8, new CompressionStream('deflate-raw'));
 export const inflateRaw = (u8) => pipe(u8, new DecompressionStream('deflate-raw'));
 
+// SHA-256 файла в виде hex (нужен HTTPS или localhost); для сверки файла до и после переноса
+export async function sha256Hex(input) {
+  const u8 = input instanceof Uint8Array ? input : input instanceof ArrayBuffer ? new Uint8Array(input) : new Uint8Array(await input.arrayBuffer());
+  const h = new Uint8Array(await crypto.subtle.digest('SHA-256', u8));
+  return Array.from(h).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 export async function zipPack(files) {
   const enc = new TextEncoder();
   const parts = [], central = [];
@@ -73,7 +80,7 @@ export function readZip(input) {
     const method = dv.getUint16(p + 10, true), csize = dv.getUint32(p + 20, true), usize = dv.getUint32(p + 24, true);
     const nl = dv.getUint16(p + 28, true), xl = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true), off = dv.getUint32(p + 42, true);
     const name = dec.decode(u8.subarray(p + 46, p + 46 + nl));
-    entries.set(name, { method, csize, usize, off });
+    entries.set(name, { method, csize, usize, off, crc: dv.getUint32(p + 16, true) });
     p += 46 + nl + xl + cl;
   }
   async function bytes(name) {
@@ -83,6 +90,7 @@ export function readZip(input) {
     const raw = u8.subarray(start, start + en.csize);
     const out = en.method === 8 ? await inflateRaw(raw) : raw.slice();
     if (en.usize && out.length !== en.usize) throw new Error('Файл «' + name + '» повреждён (размер не совпадает)');
+    if (crc32(out) !== en.crc) throw new Error('Файл «' + name + '» повреждён (контрольная сумма не совпала)');
     return out;
   }
   return {

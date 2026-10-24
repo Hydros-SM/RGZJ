@@ -1,6 +1,6 @@
 // Полевой пакет: чтение файла (.gfield — ZIP, при пароле зашифрованный), сохранение на устройстве и разбор в рабочие структуры.
 import { kvGet, kvSet, kvDel } from '../store.js';
-import { readZip } from './zip-pack.js';
+import { readZip, sha256Hex } from './zip-pack.js';
 import { isEncrypted, decryptBytes } from './field-crypto.js';
 import { unpackTerrain } from './field-formats.js';
 import { unpackFaultsModel, traceSegments } from './faults-format.js';
@@ -11,9 +11,9 @@ export const SUPPORTED = { format: 'gfield', version: 1 };
 export class NeedPassword extends Error { constructor(m) { super(m || 'Пакет защищён паролем'); this.needPassword = true; } }
 
 // Что не так с файлом, если он не открылся как пакет: пустой/обрезанный, не тот файл, неизвестный формат
-function diagnose(u8, why) {
+function diagnose(u8, why, hash) {
   const n = u8.length, mb = (n / 1048576).toFixed(2), head = String.fromCharCode(...u8.subarray(0, 8));
-  const size = 'Размер файла на планшете: ' + n.toLocaleString('ru-RU') + ' байт (' + mb + ' МБ). Сравните с размером исходного файла на компьютере: если они разные, файл не докопировался — скопируйте его заново.';
+  const size = 'Размер файла на планшете: ' + n.toLocaleString('ru-RU') + ' байт (' + mb + ' МБ). Контрольная сумма SHA-256: ' + (hash || '—') + '. Сверьте её с суммой, которую показала основная платформа после экспорта: если не совпадает, файл изменился при записи или передаче — скачайте и скопируйте его заново (одинаковый размер ещё не значит одинаковое содержимое).';
   if (n < 100) return 'Файл пустой или скачан не полностью. ' + size;
   if (/^s*</.test(head)) return 'Выбран не пакет, а веб-страница (HTML) — например, ссылка или страница облачного хранилища вместо файла. Скачайте сам файл .gfield. ' + size;
   if (/^s*[{[]/.test(head)) return 'Выбран текстовый файл (JSON), а не пакет .gfield. ' + size;
@@ -25,18 +25,19 @@ const exact = (u8) => u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLeng
 // Читает файл пакета в запись для хранилища (ничего не сохраняя); бросает NeedPassword, если нужен пароль
 export async function readPackageFile(file, password) {
   let u8 = new Uint8Array(await file.arrayBuffer());
+  let hash = ''; try { hash = await sha256Hex(u8); } catch (e) { /* без HTTPS хеш недоступен */ }
   if (isEncrypted(u8)) {
     if (!password) throw new NeedPassword();
     u8 = await decryptBytes(u8, password);
   }
   let z;
-  try { z = readZip(u8); } catch (e) { throw new Error(diagnose(u8, e.message)); }
+  try { z = readZip(u8); } catch (e) { throw new Error(/повреждён/.test(e.message) ? e.message + ' Контрольная сумма файла SHA-256: ' + (hash || '—') + ' — сверьте с суммой в основной платформе.' : diagnose(u8, e.message, hash)); }
   if (!z.has('manifest.json')) throw new Error('В файле нет manifest.json — это не полевой пакет');
   const manifest = await z.json('manifest.json');
   if (manifest.format !== SUPPORTED.format) throw new Error('Неизвестный формат пакета: ' + manifest.format);
   if (manifest.version > SUPPORTED.version) throw new Error('Пакет создан более новой версией платформы (формат ' + manifest.version + '). Обновите полевое приложение: откройте его с интернетом.');
   if (!z.has('terrain.bin') || !z.has('data.json')) throw new Error('В пакете нет рельефа или данных');
-  const rec = { manifest, data: await z.json('data.json'), terrainBuf: exact(await z.bytes('terrain.bin')) };
+  const rec = { fileHash: hash, manifest, data: await z.json('data.json'), terrainBuf: exact(await z.bytes('terrain.bin')) };
   if (z.has('faults.bin')) rec.faultsBuf = exact(await z.bytes('faults.bin'));
   const mapName = manifest.scheme && manifest.scheme.map;
   if (mapName && z.has(mapName)) rec.mapBlob = new Blob([await z.bytes(mapName)], { type: /png$/i.test(mapName) ? 'image/png' : 'image/jpeg' });
@@ -69,6 +70,6 @@ export function buildSession(rec) {
     rec, manifest: rec.manifest, data: rec.data, terrain, sampler, faults, traces,
     mapUrl: rec.mapBlob ? URL.createObjectURL(rec.mapBlob) : null,
     points: Array.from(latest.values()), history, outflows,
-    fileName: rec.fileName, importedAt: rec.importedAt,
+    fileName: rec.fileName, fileHash: rec.fileHash, importedAt: rec.importedAt,
   };
 }
