@@ -12,6 +12,8 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || new URLSe
     try {
       const reg = await navigator.serviceWorker.register('./sw.js');
       await navigator.serviceWorker.ready;
+      // 3D-библиотека нужна только на вкладке «Модель → 3D», но для офлайна должна лежать в кэше уже после первого запуска
+      await Promise.allSettled([import('three'), import('three/addons/controls/OrbitControls.js')]);
       const urls = performance.getEntriesByType('resource').map((e) => e.name).filter((u) => /^https?:/.test(u));
       const sw = reg.active || navigator.serviceWorker.controller;
       if (sw) sw.postMessage({ type: 'cache-urls', urls: urls.concat([location.href]) });

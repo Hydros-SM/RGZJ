@@ -7,7 +7,7 @@ import { PlanPage } from './pages/PlanPage.js';
 import { PointsPage } from './pages/PointsPage.js';
 import { PackagePage } from './pages/PackagePage.js';
 
-export const APP_VERSION = 'v0.1.3 (этап 1)';
+export const APP_VERSION = 'v0.2.0 (этап 2: 3D)';
 const TABS = [['map', 'Карта', MapIcon], ['points', 'Список точек', ListChecks], ['model', 'Модель', Box], ['package', 'Пакет', PackageOpen]];
 
 export function App() {
