@@ -1,0 +1,15 @@
+{
+  "name": "Полевая платформа",
+  "short_name": "Поле",
+  "description": "Офлайн-приложение для полевых работ в карьере: карта, точки, модель, фиксация выходов воды",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#FAF9F7",
+  "theme_color": "#B5851C",
+  "lang": "ru",
+  "icons": [
+    { "src": "./public/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
