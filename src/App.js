@@ -1,23 +1,36 @@
-// Оболочка полевой платформы: вкладки «Карта», «Список точек», «Модель», «Пакет»; без загруженного пакета доступна только «Пакет».
-import React, { useEffect, useState } from 'react';
-import { Map as MapIcon, ListChecks, Box, PackageOpen } from 'lucide-react';
+// Оболочка полевой платформы: вкладки «Карта», «Список точек», «Модель», «Записи», «Пакет»; без загруженного пакета доступна только «Пакет».
+// Здесь же живут полевые записи (work): новая точка / замер / выход воды — место указывается касанием, затем форма (RecordDialog).
+import React, { useEffect, useMemo, useState } from 'react';
+import { Map as MapIcon, ListChecks, Box, PackageOpen, ClipboardList } from 'lucide-react';
 import { html } from './lib/html.js';
-import { loadStoredSession } from './lib/session.js';
+import { loadStoredSession, clearSession } from './lib/session.js';
+import { loadWork, saveWork, clearWork, withWork, nextPointNumber, nextOutflowNumber, domainAt, todayIso, deletePhoto } from './lib/work.js';
 import { PlanPage } from './pages/PlanPage.js';
 import { PointsPage } from './pages/PointsPage.js';
+import { RecordsPage } from './pages/RecordsPage.js';
 import { PackagePage } from './pages/PackagePage.js';
+import { RecordDialog } from './components/RecordDialog.js';
 
-export const APP_VERSION = 'v0.2.0 (этап 2: 3D)';
-const TABS = [['map', 'Карта', MapIcon], ['points', 'Список точек', ListChecks], ['model', 'Модель', Box], ['package', 'Пакет', PackageOpen]];
+export const APP_VERSION = 'v0.3.0 (этап 2: фиксация в поле)';
+const TABS = [['map', 'Карта', MapIcon], ['points', 'Список точек', ListChecks], ['model', 'Модель', Box], ['records', 'Записи', ClipboardList], ['package', 'Пакет', PackageOpen]];
+const DEFAULT_FLOW = { mode: 'direct', unit: 'ls', value: '', volume: '', time: '' };
+const r2 = (v) => Math.round(v * 100) / 100;
+const worker = () => { try { return localStorage.getItem('field-worker') || ''; } catch (e) { return ''; } };
 
 export function App() {
   const [session, setSession] = useState(undefined); // undefined — читаем хранилище, null — пакета нет
+  const [work, setWork] = useState({ records: [] });
   const [tab, setTab] = useState('package');
   const [focusReq, setFocusReq] = useState(null);
   const [online, setOnline] = useState(navigator.onLine);
-  const [offlineReady, setOfflineReady] = useState(false); // весь код и библиотеки уже в офлайн-кэше устройства
+  const [offlineReady, setOfflineReady] = useState(false);
+  const [placing, setPlacing] = useState(null); // { type: 'point' | 'outflow', parent, draft? } — ждём касания карты
+  const [dlg, setDlg] = useState({ open: false, draft: null });
+  const [toast, setToast] = useState('');
+  const [busy, setBusy] = useState(false);
+
   useEffect(() => {
-    loadStoredSession().then((s) => { setSession(s); if (s) setTab('map'); }).catch((e) => { console.error(e); setSession(null); });
+    Promise.all([loadStoredSession(), loadWork()]).then(([s, w]) => { setWork(w); setSession(s); if (s) setTab('map'); }).catch((e) => { console.error(e); setSession(null); });
     const on = () => setOnline(true), off = () => setOnline(false);
     window.addEventListener('online', on); window.addEventListener('offline', off);
     return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
@@ -38,25 +51,74 @@ export function App() {
     setTimeout(check, 2500);
     return () => { stop = true; };
   }, []);
+  useEffect(() => { if (!toast) return undefined; const t = setTimeout(() => setToast(''), 2800); return () => clearTimeout(t); }, [toast]);
+
+  const eff = useMemo(() => (session ? withWork(session, work) : null), [session, work]);
   function onSession(s) { setSession(s); setTab(s ? 'map' : 'package'); }
   function showOnMap(req) { setFocusReq({ ...req, n: Date.now() }); setTab('map'); }
 
+  // ── полевые записи ──────────────────────────────────────────────────────
+  async function persist(records) { const w = { records }; setWork(w); try { await saveWork(w); } catch (e) { alert('Не удалось сохранить запись на планшете: ' + e.message + '. Освободите память и повторите.'); } }
+  function draftFromRecord(rec) { return { ...rec, fields: { ...rec.fields }, flow: rec.flow || DEFAULT_FLOW, photos: (rec.photos || []).slice(), zAuto: false }; }
+  function start(req) {
+    if (!eff) return;
+    if (req.edit) { const rec = work.records.find((r) => r.id === req.edit); if (rec) setDlg({ open: true, draft: draftFromRecord(rec) }); return; }
+    if (req.type === 'measure') { // новый замер существующей точки: поля берём из последней записи, положение не меняем
+      const base = eff.points.find((p) => String(p.point_number) === String(req.parent)) || {};
+      setDlg({ open: true, draft: { _new: true, type: 'measure', point_number: String(req.parent), parent_number: String(req.parent), flow: DEFAULT_FLOW, photos: [], fields: { monitoring_date: todayIso(), worker: worker(), status: base.status || 'Активная', intensity: base.intensity || '', domain: base.domain || '', wall: base.wall || '', horizon: base.horizon || '', water_color: base.water_color || '', measure_method: base.measure_method || '', water_level_z: base.water_level_z != null ? base.water_level_z : '', comment: '' } } });
+      return;
+    }
+    setPlacing({ type: req.type, parent: req.parent });
+  }
+  function onPlace({ x, y, z }) {
+    const p = placing; if (!p || !eff) return;
+    let zz = z; if (zz == null) { const r = eff.sampler.sample(x, y); zz = r ? r2(r.z) : ''; } else zz = r2(zz);
+    const zAuto = zz !== '', px = r2(x), py = r2(y);
+    setPlacing(null);
+    if (p.draft) { setDlg({ open: true, draft: { ...p.draft, x: px, y: py, z: zz, zAuto } }); return; }
+    if (p.type === 'point') setDlg({ open: true, draft: { _new: true, type: 'point', point_number: nextPointNumber(eff, work), x: px, y: py, z: zz, zAuto, flow: DEFAULT_FLOW, photos: [], fields: { monitoring_date: todayIso(), worker: worker(), status: 'Новая', intensity: '', domain: domainAt(eff.data.domains, px, py), wall: '', horizon: '', water_color: '', measure_method: '', water_level_z: zz, comment: '' } } });
+    else setDlg({ open: true, draft: { _new: true, type: 'outflow', parent_number: String(p.parent), point_number: nextOutflowNumber(eff, work, String(p.parent)), x: px, y: py, z: zz, zAuto, flow: DEFAULT_FLOW, photos: [], fields: { monitoring_date: todayIso(), status: 'Активная', comment: '' } } });
+  }
+  async function saveRecord(rec) {
+    setBusy(true);
+    const exists = work.records.some((r) => r.id === rec.id);
+    await persist(exists ? work.records.map((r) => (r.id === rec.id ? rec : r)) : [...work.records, rec]);
+    setBusy(false); setDlg({ open: false, draft: null }); setToast('Запись сохранена на планшете');
+  }
+  async function removeRecord(id) {
+    const rec = work.records.find((r) => r.id === id); if (!rec) return;
+    if (!confirm('Удалить запись «' + rec.point_number + '» с планшета?')) return;
+    for (const pid of rec.photos || []) await deletePhoto(pid);
+    await persist(work.records.filter((r) => r.id !== id)); setToast('Запись удалена');
+  }
+  async function wipeAll() {
+    const n = work.records.length;
+    if (!confirm(n ? 'На планшете ' + n + ' полевых записей, которые ещё не выгружены. Удалить пакет И эти записи без возможности восстановления?' : 'Удалить пакет и данные полевой работы с этого планшета?')) return;
+    await clearWork(); await clearSession(); setWork({ records: [] }); onSession(null);
+  }
+  function repick() { const d = dlg.draft; setPlacing({ type: d.type, parent: d.parent_number, draft: d }); setDlg({ open: false, draft: d }); }
+  function closeDlg() { setDlg({ open: false, draft: null }); }
+
   const need = !session && tab !== 'package';
+  const sessionProps = eff || session;
   return html`
     <div class="field-shell">
       <header class="field-top">
         <div class="brand"><b>Полевая платформа</b><span>${session ? session.manifest.quarry + ' · схема ' + (session.manifest.scheme && session.manifest.scheme.weekKey) : 'пакет не загружен'}</span></div>
-        <nav class="tabs">${TABS.map(([k, label, Icon]) => html`<button key=${k} class=${'tab' + (tab === k ? ' active' : '')} disabled=${!session && k !== 'package'} onClick=${() => setTab(k)}><${Icon} size=${20} /><span>${label}</span></button>`)}</nav>
+        <nav class="tabs">${TABS.map(([k, label, Icon]) => html`<button key=${k} class=${'tab' + (tab === k ? ' active' : '')} disabled=${!session && k !== 'package'} onClick=${() => { setTab(k); }}><${Icon} size=${20} /><span>${label}${k === 'records' && work.records.length ? ' (' + work.records.length + ')' : ''}</span></button>`)}</nav>
         ${offlineReady && html`<div class="net on" title="Код приложения сохранён на устройстве: оно откроется и без интернета">готово без сети ✓</div>`}
         <div class=${'net ' + (online ? 'on' : 'off')} title=${online ? 'Есть интернет' : 'Нет интернета — работаем офлайн'}>${online ? 'онлайн' : 'офлайн'}</div>
       </header>
       <main class="field-main">
         ${session === undefined && html`<div class="empty">Читаю данные планшета…</div>`}
-        ${session !== undefined && (need || tab === 'package') && html`<${PackagePage} session=${session} onSession=${onSession} />`}
-        ${session && tab === 'map' && html`<${PlanPage} key="map" session=${session} mode="map" focusRequest=${focusReq} />`}
-        ${session && tab === 'model' && html`<${PlanPage} key="model" session=${session} mode="model" focusRequest=${focusReq} />`}
-        ${session && tab === 'points' && html`<${PointsPage} session=${session} onShowOnMap=${showOnMap} />`}
+        ${session !== undefined && (need || tab === 'package') && html`<${PackagePage} session=${session} onSession=${onSession} workCount=${work.records.length} onWipe=${wipeAll} />`}
+        ${session && tab === 'map' && html`<${PlanPage} key="map" session=${sessionProps} mode="map" focusRequest=${focusReq} placing=${placing} onStart=${start} onPlace=${onPlace} onCancelPlace=${() => setPlacing(null)} />`}
+        ${session && tab === 'model' && html`<${PlanPage} key="model" session=${sessionProps} mode="model" focusRequest=${focusReq} placing=${placing} onStart=${start} onPlace=${onPlace} onCancelPlace=${() => setPlacing(null)} />`}
+        ${session && tab === 'points' && html`<${PointsPage} session=${sessionProps} onShowOnMap=${showOnMap} />`}
+        ${session && tab === 'records' && html`<${RecordsPage} work=${work} onEdit=${(id) => start({ edit: id })} onDelete=${removeRecord} />`}
       </main>
+      ${eff && html`<${RecordDialog} open=${dlg.open} draft=${dlg.draft} onChange=${(d) => setDlg({ open: true, draft: d })} onSave=${saveRecord} onClose=${closeDlg} onRepick=${repick} session=${eff} work=${work} busy=${busy} />`}
+      ${toast && html`<div class="toast">${toast}</div>`}
       <footer class="field-foot">${APP_VERSION}</footer>
     </div>`;
 }

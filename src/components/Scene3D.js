@@ -6,10 +6,10 @@ import { buildScene } from '../lib/scene3d.js';
 
 const visKey = (k) => k.replace(/C$/, '');
 
-export function Scene3D({ session, layers, vexag, terrainOp = 0.6, selected, onPick, focus, viewCmd }) {
+export function Scene3D({ session, layers, vexag, terrainOp = 0.6, selected, onPick, focus, viewCmd, placing, onPlace }) {
   const wrapRef = useRef(null);
   const S = useRef({});
-  const props = useRef({}); props.current = { layers, vexag, terrainOp, selected, onPick };
+  const props = useRef({}); props.current = { session, layers, vexag, terrainOp, selected, onPick, placing, onPlace };
   const [state, setState] = useState('loading'); // loading | ready | error
   const [errMsg, setErrMsg] = useState('');
 
@@ -27,7 +27,7 @@ export function Scene3D({ session, layers, vexag, terrainOp = 0.6, selected, onP
     const sel = props.current.selected;
     s.B.faultMeshes.forEach((m) => { const on = sel && sel.kind === 'fault' && sel.key === m.userData.key; m.material.opacity = on ? 0.8 : m.userData.baseOpacity; m.material.emissive && m.material.emissive.set(on ? '#f59e0b' : '#000000'); });
     if (s.ring) { s.B.group.remove(s.ring); s.ring.geometry.dispose(); s.ring = null; }
-    const m = sel && sel.kind !== 'fault' ? s.B.markers.find((x) => x.kind === sel.kind && x.item === sel.item) : null;
+    const m = sel && sel.kind !== 'fault' ? s.B.markers.find((x) => x.kind === sel.kind && (x.item === sel.item || (sel.kind === 'point' && x.item.point_number === sel.item.point_number) || (sel.kind === 'outflow' && x.item.id === sel.item.id))) : null;
     if (m) {
       const THREE = s.THREE, g = new THREE.BufferGeometry().setFromPoints([m.v]);
       s.ring = new THREE.Points(g, new THREE.PointsMaterial({ size: 34, sizeAttenuation: false, map: s.ringTex, transparent: true, alphaTest: 0.3, depthTest: false }));
@@ -48,7 +48,7 @@ export function Scene3D({ session, layers, vexag, terrainOp = 0.6, selected, onP
         renderer.setClearColor(0xdfe3e8); wrap.appendChild(renderer.domElement); renderer.domElement.style.touchAction = 'none'; renderer.domElement.className = 'scene3d-canvas';
         const scene = new THREE.Scene();
         scene.add(new THREE.AmbientLight(0xffffff, 0.7)); const sun = new THREE.DirectionalLight(0xffffff, 0.8); sun.position.set(0.6, 1, 0.8); scene.add(sun);
-        const B = buildScene(THREE, session); scene.add(B.group);
+        const B = buildScene(THREE, props.current.session); scene.add(B.group);
         const camera = new THREE.PerspectiveCamera(45, W / H, 1, B.radius * 30);
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = false; controls.maxPolarAngle = Math.PI * 0.495; controls.screenSpacePanning = true;
@@ -70,6 +70,12 @@ export function Scene3D({ session, layers, vexag, terrainOp = 0.6, selected, onP
           const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y), dt = Date.now() - down.t; down = null;
           if (moved > 6 || dt > 600) return;
           const rect = cv.getBoundingClientRect(), mx = e.clientX - rect.left, my = e.clientY - rect.top, P = props.current;
+          if (P.placing && P.onPlace) { // режим «указать место»: точка на рельефе под пальцем
+            const rc0 = new THREE.Raycaster(); rc0.setFromCamera(new THREE.Vector2((mx / rect.width) * 2 - 1, -(my / rect.height) * 2 + 1), camera);
+            const h0 = rc0.intersectObject(B.terrainMesh, false)[0];
+            if (h0) { const vx = P.vexag || 1; P.onPlace({ x: h0.point.x + B.cx, y: -h0.point.z + B.cy, z: h0.point.y / vx + B.cz }); }
+            return;
+          }
           let best = null, bd = 26;
           B.markers.forEach((m) => {
             if (P.layers[visKey(m.layer)] === false) return;
@@ -99,8 +105,9 @@ export function Scene3D({ session, layers, vexag, terrainOp = 0.6, selected, onP
       if (s.renderer) { s.controls && s.controls.dispose(); s.scene.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) { (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => { m.map && m.map.dispose(); m.dispose(); }); } }); s.renderer.dispose(); if (s.renderer.domElement.parentNode) s.renderer.domElement.parentNode.removeChild(s.renderer.domElement); }
       S.current = {};
     };
-  }, [session]);
+  }, [session.rec]);
 
+  useEffect(() => { const s = S.current; if (s.B && s.B.refreshPoints) { s.B.refreshPoints(session); applyLayers(); applySelection(); } }, [session.points, session.outflows]);
   useEffect(() => { applyLayers(); }, [layers, vexag, terrainOp]);
   useEffect(() => { applySelection(); }, [selected]);
   useEffect(() => {

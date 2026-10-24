@@ -5,11 +5,12 @@ import { Maximize2, ZoomIn, ZoomOut } from 'lucide-react';
 import { html } from '../lib/html.js';
 import { drawOverlay, pickNearest } from '../lib/plan-draw.js';
 
-export function PlanCanvas({ base, overlay, onPick, focus }) {
+export function PlanCanvas({ base, overlay, onPick, focus, placing, onPlace }) {
   const wrapRef = useRef(null), cvRef = useRef(null);
   const cam = useRef({ cx: 0, cy: 0, k: 0.3 }), size = useRef({ W: 400, H: 300 }), picks = useRef([]);
   const ptrs = useRef(new Map()), gesture = useRef(null), rafRef = useRef(0);
   const ov = useRef(overlay); ov.current = overlay;
+  const pl = useRef({}); pl.current = { placing, onPlace }; // режим «указать место»: касание не выбирает объект, а отдаёт координаты
   const bs = useRef(base); bs.current = base;
   const focusRef = useRef(null); // запрошенный фокус (например, «Показать на карте»): подгонка вида при загрузке подложки его не сбрасывает
   const [coords, setCoords] = useState('');
@@ -78,14 +79,17 @@ export function PlanCanvas({ base, overlay, onPick, focus }) {
     const g = gesture.current, p = rel(e);
     ptrs.current.delete(e.pointerId);
     if (ptrs.current.size === 0) {
-      if (g && !g.moved && !g.pinch && onPick) onPick(pickNearest(picks.current, cam.current, size.current, p.x, p.y));
+      if (g && !g.moved && !g.pinch) {
+        if (pl.current.placing && pl.current.onPlace) { const c = cam.current; pl.current.onPlace({ x: (p.x - size.current.W / 2) / c.k + c.cx, y: (size.current.H / 2 - p.y) / c.k + c.cy }); }
+        else if (onPick) onPick(pickNearest(picks.current, cam.current, size.current, p.x, p.y));
+      }
       gesture.current = null;
     } else if (g && g.pinch && ptrs.current.size < 2) gesture.current = { moved: true, sx: e.clientX, sy: e.clientY, cx: cam.current.cx, cy: cam.current.cy };
   }
 
   return html`
     <div ref=${wrapRef} class="plan-wrap">
-      <canvas ref=${cvRef} class="plan-canvas" onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up} />
+      <canvas ref=${cvRef} class=${'plan-canvas' + (placing ? ' placing' : '')} onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up} />
       <div class="plan-tools">
         <button class="plan-btn" onClick=${() => zoomAt(size.current.W / 2, size.current.H / 2, 1.4)} title="Приблизить"><${ZoomIn} size=${20} /></button>
         <button class="plan-btn" onClick=${() => zoomAt(size.current.W / 2, size.current.H / 2, 1 / 1.4)} title="Отдалить"><${ZoomOut} size=${20} /></button>

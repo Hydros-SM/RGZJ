@@ -98,8 +98,17 @@ export function buildScene(THREE, session) {
     g.add(new THREE.Points(geo, new THREE.PointsMaterial({ size, sizeAttenuation: false, map: tex, vertexColors: true, transparent: true, alphaTest: 0.4, depthTest: true })));
   };
   const white = circleTexture(THREE, '#ffffff'), dia = diamondTexture(THREE, '#ffffff');
-  pointsLayer('points', session.points.filter((p) => p.x_local != null).map((p) => ({ v: v3(p.x_local, p.y_local, zAt(p.x_local, p.y_local) + 2), color: STATUS_COLORS[p.status] || '#666666', p })), white, 16, (it) => ({ kind: 'point', item: it.p }));
-  pointsLayer('outflows', session.outflows.filter((o) => o.x_local != null).map((o) => ({ v: v3(o.x_local, o.y_local, (o.water_level_z != null ? Number(o.water_level_z) : zAt(o.x_local, o.y_local)) + 1.5), color: o.status === 'Пересохла' ? '#8a8f98' : '#0e7490', o })), dia, 15, (it) => ({ kind: 'outflow', item: it.o }));
+  // точки замера и выходы воды (в том числе созданные в поле — фиолетовые): пересоздаются при изменении записей без перестройки рельефа
+  const buildPoints = (sess) => {
+    pointsLayer('points', sess.points.filter((p) => p.x_local != null).map((p) => ({ v: v3(p.x_local, p.y_local, zAt(p.x_local, p.y_local) + 2), color: p._field ? '#7c3aed' : (STATUS_COLORS[p.status] || '#666666'), p })), white, 16, (it) => ({ kind: 'point', item: it.p }));
+    pointsLayer('outflows', sess.outflows.filter((o) => o.x_local != null).map((o) => ({ v: v3(o.x_local, o.y_local, (o.water_level_z != null ? Number(o.water_level_z) : zAt(o.x_local, o.y_local)) + 1.5), color: o._field ? '#7c3aed' : (o.status === 'Пересохла' ? '#8a8f98' : '#0e7490'), o })), dia, 15, (it) => ({ kind: 'outflow', item: it.o }));
+  };
+  const refreshPoints = (sess) => {
+    ['points', 'outflows'].forEach((k) => { const g = layerGroups[k]; if (g) { g.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); }); group.remove(g); delete layerGroups[k]; } });
+    for (let i = markers.length - 1; i >= 0; i--) if (markers[i].layer === 'points' || markers[i].layer === 'outflows') markers.splice(i, 1);
+    buildPoints(sess);
+  };
+  buildPoints(session);
   const wellLines = (key, wells, color) => {
     const g = lg(key); const pts = [];
     wells.forEach((w) => { if (w.end && w.collar.z != null) { pts.push(v3(w.collar.x, w.collar.y, w.collar.z), v3(w.end.x, w.end.y, w.end.z)); } });
@@ -113,5 +122,5 @@ export function buildScene(THREE, session) {
   pointsLayer('sensors', pz.flatMap((w) => w.sensors.map((s) => ({ v: v3(s.x, s.y, s.z), color: '#1e3a8a', s: { ...s, well: w.name } }))), white, 9, (it) => ({ kind: 'sensor', item: it.s }));
   // слои, у которых несколько объектов-групп, включаются вместе (маркеры устьев — с линиями)
   const alias = { horizontal: ['horizontal', 'horizontalC'], piezo: ['piezo', 'piezoC'], observation: ['observation', 'observationC'] };
-  return { group, markers, center: { x: 0, y: 0, z: 0 }, radius, layerGroups, alias, terrainMesh, faultMeshes, cx, cy, cz, zmin: zmin - cz, zmax: zmax - cz, v3, zAt };
+  return { group, markers, refreshPoints, center: { x: 0, y: 0, z: 0 }, radius, layerGroups, alias, terrainMesh, faultMeshes, cx, cy, cz, zmin: zmin - cz, zmax: zmax - cz, v3, zAt };
 }

@@ -1,6 +1,7 @@
 // Карточка выбранного объекта (точка, выход воды, разлом, скважина, датчик): подробности и история замеров.
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
+import { getPhoto } from '../lib/work.js';
 import { html } from '../lib/html.js';
 import { STATUS_COLORS } from '../lib/map-style.js';
 import { WATER_CLASSES, ROLES } from '../lib/faults-format.js';
@@ -11,7 +12,13 @@ const num = (v, d = 2) => (v == null || v === '' || !Number.isFinite(Number(v)) 
 const flow = (v) => (v == null || v === '' ? '—' : Number(v).toFixed(2) + ' л/с · ' + (Number(v) * 3.6).toFixed(1) + ' м³/ч');
 const Row = ({ k, v }) => html`<div class="info-row"><span>${k}</span><b>${v == null || v === '' ? '—' : v}</b></div>`;
 
-export function InfoSheet({ session, selected, onClose, onSelect }) {
+function Gallery({ ids }) {
+  const [urls, setUrls] = useState([]);
+  useEffect(() => { let dead = false; const made = []; Promise.all((ids || []).map((id) => getPhoto(id))).then((bl) => { if (dead) return; const u = bl.filter(Boolean).map((b) => { const x = URL.createObjectURL(b); made.push(x); return x; }); setUrls(u); }); return () => { dead = true; made.forEach((x) => URL.revokeObjectURL(x)); }; }, [(ids || []).join(',')]);
+  return urls.length ? html`<div class="info-h">Фото</div><div class="thumbs">${urls.map((u) => html`<a key=${u} href=${u} target="_blank" rel="noopener"><img class="thumb-img" src=${u} alt="фото" /></a>`)}</div>` : null;
+}
+
+export function InfoSheet({ session, selected, onClose, onSelect, onAction }) {
   if (!selected) return null;
   const { kind } = selected, D = session.data;
   let title = '', badge = null, body = null;
@@ -25,6 +32,8 @@ export function InfoSheet({ session, selected, onClose, onSelect }) {
       <${Row} k="X / Y" v=${p.x_local != null ? num(p.x_local) + ' / ' + num(p.y_local) : null} />
       ${p.comment && html`<div class="info-comment">«${p.comment}»</div>`}
       ${exits.length > 0 && html`<div class="info-h">Выходы воды (${exits.length})</div>${exits.map((o) => html`<div key=${o.id} class="info-link" onClick=${() => onSelect({ kind: 'outflow', item: o })}><i class="dia" /> <b>${o.point_number}</b><span>${o.water_level_z != null ? 'Z ' + num(o.water_level_z, 1) : 'Z —'} · ${o.status || ''}</span></div>`)}`}
+      ${p._photos && p._photos.length > 0 && html`<${Gallery} ids=${p._photos} />`}
+      ${onAction && html`<div class="info-actions"><button class="btn btn-primary" onClick=${() => onAction({ type: 'measure', parent: p.point_number })}>Новый замер</button><button class="btn btn-outline" onClick=${() => onAction({ type: 'outflow', parent: p.point_number })}>Добавить выход воды</button>${p._rec && html`<button class="btn btn-ghost" onClick=${() => onAction({ edit: p._rec })}>Изменить запись</button>`}</div>`}
       ${hist.length > 1 && html`<div class="info-h">История замеров (${hist.length})</div>
         <table class="info-table"><thead><tr><th>Дата</th><th>Дебит, л/с</th><th>Статус</th><th>Сотрудник</th></tr></thead><tbody>
           ${hist.slice(0, 20).map((h) => html`<tr key=${h.id}><td>${fmtDate(h.monitoring_date)}</td><td>${num(h.flow_rate)}</td><td>${h.status || '—'}</td><td>${h.worker || '—'}</td></tr>`)}
@@ -34,6 +43,8 @@ export function InfoSheet({ session, selected, onClose, onSelect }) {
     title = 'Выход воды ' + o.point_number; badge = o.status;
     body = html`<${Row} k="Точка замера" v=${'№' + o.parent_number} /><${Row} k="Дата фиксации" v=${fmtDate(o.monitoring_date)} /><${Row} k="Отметка выхода Z" v=${o.water_level_z != null ? num(o.water_level_z) + ' м' : null} />
       <${Row} k="X / Y" v=${num(o.x_local) + ' / ' + num(o.y_local)} />${o.comment && html`<div class="info-comment">«${o.comment}»</div>`}
+      ${o._photos && o._photos.length > 0 && html`<${Gallery} ids=${o._photos} />`}
+      ${onAction && o._rec && html`<div class="info-actions"><button class="btn btn-ghost" onClick=${() => onAction({ edit: o._rec })}>Изменить запись</button></div>`}
       <div class="info-link" onClick=${() => { const par = session.points.find((q) => q.point_number === o.parent_number); if (par) onSelect({ kind: 'point', item: par }); }}>Открыть точку замера №${o.parent_number}</div>`;
   } else if (kind === 'fault') {
     const s = session.faults.surfaces.find((x) => x.key === selected.key), fp = (D.faultProps || {})[selected.key] || {};
@@ -52,7 +63,7 @@ export function InfoSheet({ session, selected, onClose, onSelect }) {
   }
   return html`
     <div class="info-sheet">
-      <div class="info-head"><b>${title}</b>${badge && html`<${Badge} style=${{ background: (STATUS_COLORS[badge] || '#888') + '22', color: STATUS_COLORS[badge] || '#555' }}>${badge}<//>`}
+      <div class="info-head"><b>${title}</b>${selected.item && selected.item._field && html`<span class="badge-field">полевая запись</span>`}${badge && html`<${Badge} style=${{ background: (STATUS_COLORS[badge] || '#888') + '22', color: STATUS_COLORS[badge] || '#555' }}>${badge}<//>`}
         <button class="info-x" onClick=${onClose}><${X} size=${20} /></button></div>
       <div class="info-body">${body}</div>
     </div>`;

@@ -8,7 +8,7 @@ import { storageInfo, requestPersistence } from '../store.js';
 const fmtDt = (s) => { try { return new Date(s).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' }); } catch (e) { return s || '—'; } };
 const mb = (n) => (n / 1048576).toFixed(1);
 
-export function PackagePage({ session, onSession }) {
+export function PackagePage({ session, onSession, workCount = 0, onWipe }) {
   const fileRef = useRef(null);
   const [file, setFile] = useState(null);
   const [needPw, setNeedPw] = useState(false);
@@ -32,13 +32,11 @@ export function PackagePage({ session, onSession }) {
   function onPick(e) {
     const f = e.target.files && e.target.files[0]; e.target.value = '';
     if (!f) return;
-    if (session && !confirm('Данные на планшете будут заменены пакетом «' + f.name + '». Продолжить?')) return;
+    const warn = workCount ? '\n\nПолевые записи (' + workCount + ') останутся на планшете и добавятся к новому пакету. Если новый пакет — для другого карьера или другой недели, сначала выгрузите записи.' : '';
+    if (session && !confirm('Пакет на планшете будет заменён файлом «' + f.name + '».' + warn + '\n\nПродолжить?')) return;
     setFile(f); setNeedPw(false); setPw(''); doImport(f, null);
   }
-  async function wipe() {
-    if (!confirm('Удалить пакет и все данные полевой работы с этого планшета?')) return;
-    await clearSession(); onSession(null);
-  }
+  async function wipe() { if (onWipe) await onWipe(); }
 
   const m = session && session.manifest, c = m && m.counts;
   return html`

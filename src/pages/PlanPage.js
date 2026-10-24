@@ -1,6 +1,6 @@
 // Вкладки «Карта» (подложка — схема карьера) и «Модель» (подложка — рельеф; есть переключатель «План / 3D»): слои и карточка объекта.
 import React, { useEffect, useMemo, useState } from 'react';
-import { Layers } from 'lucide-react';
+import { Layers, Plus, X } from 'lucide-react';
 import { html } from '../lib/html.js';
 import { LAYERS, DEFAULT_LAYERS } from '../lib/plan-draw.js';
 import { LAYERS_3D, DEFAULT_LAYERS_3D } from '../lib/scene3d.js';
@@ -23,7 +23,7 @@ const ls = (key, def) => { try { return { ...def, ...JSON.parse(localStorage.get
 const lsSet = (key, v) => { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) { /* не критично */ } };
 
 // mode: 'map' | 'model'
-export function PlanPage({ session, mode, focusRequest }) {
+export function PlanPage({ session, mode, focusRequest, placing, onStart, onPlace, onCancelPlace }) {
   const [layers, setLayers] = useState(() => ls('field-layers-' + mode, mode === 'map' ? { ...DEFAULT_LAYERS, faults2d: true, faults3d: false } : DEFAULT_LAYERS));
   const [layers3d, setLayers3d] = useState(() => ls('field-layers3d', DEFAULT_LAYERS_3D));
   const [view, setView] = useState(() => (mode === 'model' ? (localStorage.getItem('field-view') || 'plan') : 'plan'));
@@ -33,19 +33,31 @@ export function PlanPage({ session, mode, focusRequest }) {
   const [panel, setPanel] = useState(false);
   const [selected, setSelected] = useState(null);
   const [focus, setFocus] = useState(null);
+  const [fab, setFab] = useState(false);
+  const [hint, setHint] = useState('');
   const is3d = mode === 'model' && view === '3d';
   const img = useImage(mode === 'map' ? session.mapUrl : null);
-  const raster = useMemo(() => (mode === 'model' || (mode === 'map' && !session.mapUrl) ? makeRaster(session.terrain) : null), [session, mode]);
+  const raster = useMemo(() => (mode === 'model' || (mode === 'map' && !session.mapUrl) ? makeRaster(session.terrain) : null), [session.terrain, session.mapUrl, mode]);
   const base = useMemo(() => {
     if (mode === 'map' && img && session.manifest.scheme && session.manifest.scheme.bounds) return { kind: 'image', el: img, bounds: session.manifest.scheme.bounds };
     return raster ? { kind: 'raster', el: raster.el, bounds: raster.bounds } : null;
-  }, [mode, img, raster, session]);
+  }, [mode, img, raster, session.manifest]);
+  // при фиксации новой точки / выхода нужные слои должны быть видны — иначе записанный объект не увидеть и не выбрать
+  useEffect(() => { if (placing) { const on = (l) => (l.points && l.outflows ? l : { ...l, points: true, outflows: true }); setLayers(on); setLayers3d(on); } }, [!!placing]);
   useEffect(() => { lsSet('field-layers-' + mode, layers); }, [layers]);
   useEffect(() => { lsSet('field-layers3d', layers3d); }, [layers3d]);
   useEffect(() => { try { if (mode === 'model') localStorage.setItem('field-view', view); } catch (e) { /* не критично */ } }, [view]);
   useEffect(() => { if (focusRequest) { setSelected(focusRequest.selected); if (focusRequest.x != null) setFocus({ x: focusRequest.x, y: focusRequest.y, k: 2, n: focusRequest.n }); } }, [focusRequest]);
 
-  const overlay = { data: session.data, layers, points: session.points, outflows: session.outflows, traces: session.traces, faults: session.faults, selected };
+  // Выбранный объект берём из актуальной сессии — после новой записи карточка показывает свежие данные
+  const live = useMemo(() => {
+    if (!selected || !selected.item) return selected;
+    const it = selected.item;
+    const fresh = selected.kind === 'point' ? session.points.find((p) => p.point_number === it.point_number)
+      : selected.kind === 'outflow' ? session.outflows.find((o) => o.id === it.id) : null;
+    return fresh && fresh !== it ? { ...selected, item: fresh } : selected;
+  }, [selected, session.points, session.outflows]);
+  const overlay = { data: session.data, layers, points: session.points, outflows: session.outflows, traces: session.traces, faults: session.faults, selected: live };
   const select = (p) => {
     if (!p) { setSelected(null); return; }
     if (p.kind === 'fault') setSelected({ kind: 'fault', key: p.key });
@@ -57,8 +69,8 @@ export function PlanPage({ session, mode, focusRequest }) {
   const hasFaults = !!session.faults;
   return html`
     <div class="plan-page">
-      ${is3d ? html`<${Scene3D} session=${session} layers=${layers3d} vexag=${vexag} terrainOp=${terrainOp} selected=${selected} onPick=${select} focus=${focus} viewCmd=${viewCmd} />`
-        : html`<${PlanCanvas} base=${base} overlay=${overlay} onPick=${select} focus=${focus} />`}
+      ${is3d ? html`<${Scene3D} session=${session} layers=${layers3d} vexag=${vexag} terrainOp=${terrainOp} selected=${live} onPick=${select} focus=${focus} viewCmd=${viewCmd} placing=${!!placing} onPlace=${onPlace} />`
+        : html`<${PlanCanvas} base=${base} overlay=${overlay} onPick=${select} focus=${focus} placing=${!!placing} onPlace=${onPlace} />`}
       ${mode === 'model' && html`<div class="view-switch">
         <button class=${view === 'plan' ? 'on' : ''} onClick=${() => setView('plan')}>План</button>
         <button class=${view === '3d' ? 'on' : ''} onClick=${() => setView('3d')}>3D</button>
@@ -71,6 +83,16 @@ export function PlanPage({ session, mode, focusRequest }) {
         ${list.filter(([k]) => hasFaults || !/^fault/.test(k)).map(([k, label]) => html`<label key=${k}><input type="checkbox" checked=${cur[k] !== false && !!cur[k]} onChange=${(e) => setCur((l) => ({ ...l, [k]: e.target.checked }))} /> ${label}</label>`)}
       </div>`}
       ${noMap && html`<div class="plan-note">В пакете нет картинки схемы — подложка построена по рельефу.</div>`}
-      <${InfoSheet} session=${session} selected=${selected} onClose=${() => setSelected(null)} onSelect=${setSelected} />
+      ${placing && html`<div class="placing-banner"><span>${placing.type === 'outflow' ? 'Коснитесь места, где вода выходит на поверхность (точка №' + placing.parent + ')' : 'Коснитесь места новой точки водопроявления'}${is3d ? ' — на поверхности рельефа' : ''}</span><button class="btn btn-outline" onClick=${onCancelPlace}>Отмена</button></div>`}
+      ${!placing && hint && html`<div class="placing-banner"><span>${hint}</span><button class="btn btn-ghost" onClick=${() => setHint('')}><${X} size=${16} /></button></div>`}
+      ${!placing && html`<div class=${'fab' + (selected ? ' with-sheet' : '')}>
+        ${fab && html`<div class="fab-menu">
+          <button onClick=${() => { setFab(false); onStart({ type: 'point' }); }}>Новая точка водопроявления</button>
+          <button onClick=${() => { setFab(false); const p = selected && selected.kind === 'point' ? selected.item.point_number : selected && selected.kind === 'outflow' ? selected.item.parent_number : null; if (p) onStart({ type: 'outflow', parent: p }); else setHint('Сначала коснитесь точки замера, к которой относится выход воды, затем снова «Записать → Выход воды». Или откройте карточку точки и нажмите «Добавить выход воды».'); }}>Выход воды (для выбранной точки)</button>
+          <button onClick=${() => { setFab(false); if (selected && selected.kind === 'point') onStart({ type: 'measure', parent: selected.item.point_number }); else setHint('Сначала коснитесь точки замера, затем «Записать → Новый замер».'); }}>Новый замер (для выбранной точки)</button>
+        </div>`}
+        <button class="fab-main" onClick=${() => setFab((v) => !v)}><${Plus} size=${22} /> Записать</button>
+      </div>`}
+      <${InfoSheet} session=${session} selected=${live} onClose=${() => setSelected(null)} onSelect=${setSelected} onAction=${onStart} />
     </div>`;
 }

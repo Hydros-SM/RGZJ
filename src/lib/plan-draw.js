@@ -64,12 +64,13 @@ export function drawOverlay(ctx, cam, size, dpr, S) {
     const px = clamp(INTENSITY_PX[p.intensity] || 5.5, 4, 16), col = STATUS_COLORS[p.status] || '#666', sel = S.selected && S.selected.kind === 'point' && S.selected.item.point_number === p.point_number;
     ctx.beginPath(); ctx.arc(p.x_local, p.y_local, px * 1.6 / k, 0, Math.PI * 2); ctx.fillStyle = col + '30'; ctx.fill();
     ctx.beginPath(); ctx.arc(p.x_local, p.y_local, px / k, 0, Math.PI * 2); ctx.fillStyle = col; ctx.fill(); ctx.strokeStyle = sel ? '#f59e0b' : 'rgba(255,255,255,.9)'; ctx.lineWidth = (sel ? 3 : 1.5) / k; ctx.stroke();
+    if (p._field) { ctx.beginPath(); ctx.arc(p.x_local, p.y_local, px * 2.1 / k, 0, Math.PI * 2); ctx.setLineDash([3 / k, 3 / k]); ctx.strokeStyle = '#7c3aed'; ctx.lineWidth = 2 / k; ctx.stroke(); ctx.setLineDash([]); } // созданные в поле — с фиолетовым пунктирным кольцом
     picks.push({ kind: 'point', item: p, x: p.x_local, y: p.y_local, rPx: px + 6 });
     if (k > 0.9) texts.push({ x: p.x_local, y: p.y_local, t: String(p.point_number), color: '#fff', size: 10, center: true, plain: true });
   });
   if (L.outflows) S.outflows.forEach((o) => {
     if (o.x_local == null || o.y_local == null) return;
-    const col = o.status === 'Пересохла' ? '#8a8f98' : OUTFLOW_COLOR, r = 4.6 / k, sel = S.selected && S.selected.kind === 'outflow' && S.selected.item.id === o.id;
+    const col = o._field ? '#7c3aed' : (o.status === 'Пересохла' ? '#8a8f98' : OUTFLOW_COLOR), r = 4.6 / k, sel = S.selected && S.selected.kind === 'outflow' && S.selected.item.id === o.id;
     const par = S.points.find((q) => q.point_number === o.parent_number);
     if (par && par.x_local != null) { ctx.beginPath(); ctx.moveTo(par.x_local, par.y_local); ctx.lineTo(o.x_local, o.y_local); ctx.setLineDash([4 / k, 3 / k]); ctx.strokeStyle = col + 'b0'; ctx.lineWidth = 1 / k; ctx.stroke(); ctx.setLineDash([]); }
     ctx.save(); ctx.translate(o.x_local, o.y_local); ctx.rotate(Math.PI / 4); ctx.fillStyle = col; ctx.strokeStyle = sel ? '#f59e0b' : '#fff'; ctx.lineWidth = (sel ? 2.6 : 1.3) / k; ctx.beginPath(); ctx.rect(-r * 0.8, -r * 0.8, r * 1.6, r * 1.6); ctx.fill(); ctx.stroke(); ctx.restore();
