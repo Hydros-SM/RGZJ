@@ -55,7 +55,15 @@ export function withWork(session, work) {
   const history = new Map(Array.from(session.history.entries()).map(([k, v]) => [k, v.slice()]));
   const outflows = session.outflows.slice();
   recs.slice().sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt))).forEach((r) => {
-    if (r.type === 'point' || r.type === 'measure') {
+    if (r.edit && r.type === 'point') { // правка точки пакета: заменяем последний замер и его строку в истории
+      const base = latest.get(r.point_number) || {};
+      const row = { ...base, ...r.fields, id: base.id || r.id, point_number: r.point_number, kind: 'measure', x_local: r.x != null ? r.x : base.x_local, y_local: r.y != null ? r.y : base.y_local, _field: true, _edited: true, _rec: r.id, _photos: r.photos || [] };
+      latest.set(r.point_number, row);
+      const h = history.get(r.point_number); if (h) { const i = h.findIndex((q) => q.id === base.id); if (i >= 0) h[i] = row; else h.unshift(row); }
+    } else if (r.edit && r.type === 'outflow') {
+      const i = outflows.findIndex((o) => o.point_number === r.point_number);
+      if (i >= 0) outflows[i] = { ...outflows[i], x_local: r.x, y_local: r.y, water_level_z: r.z, status: r.fields.status || outflows[i].status, comment: r.fields.comment || '', monitoring_date: r.fields.monitoring_date || outflows[i].monitoring_date, _field: true, _edited: true, _rec: r.id, _photos: r.photos || [] };
+    } else if (r.type === 'point' || r.type === 'measure') {
       const base = latest.get(r.point_number) || {};
       const row = { ...base, ...r.fields, id: r.id, point_number: r.point_number, kind: 'measure', x_local: r.x != null ? r.x : base.x_local, y_local: r.y != null ? r.y : base.y_local, monitoring_date: r.fields.monitoring_date || todayIso(), _field: true, _rec: r.id, _photos: r.photos || [] };
       latest.set(r.point_number, row);

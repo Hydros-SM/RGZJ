@@ -5,10 +5,10 @@ import { STATUS_COLORS } from './map-style.js';
 import { FAULT_GROUP_COLORS, WATER_CLASS_COLORS } from './faults-format.js';
 
 export const LAYERS_3D = [
-  ['terrain', 'Рельеф'], ['faultSurf', 'Разломы под рельефом'], ['faultAir', 'Разломы выше рельефа'], ['faultLines', 'Разломы (линии выхода)'], ['points', 'Точки замера'], ['outflows', 'Выходы воды'],
+  ['terrain', 'Рельеф'], ['contours', 'Горизонты (изолинии с отметками)'], ['faultSurf', 'Разломы под рельефом'], ['faultAir', 'Разломы выше рельефа'], ['faultLines', 'Разломы (линии выхода)'], ['points', 'Точки замера'], ['outflows', 'Выходы воды'],
   ['piezo', 'Пьезометры'], ['sensors', 'Датчики'], ['observation', 'Наблюдательные скважины'], ['horizontal', 'Горизонтальные скважины'],
 ];
-export const DEFAULT_LAYERS_3D = { terrain: true, faultSurf: true, faultAir: false, faultLines: true, points: true, outflows: true, piezo: true, sensors: true, observation: true, horizontal: true };
+export const DEFAULT_LAYERS_3D = { terrain: true, contours: true, faultSurf: true, faultAir: false, faultLines: true, points: true, outflows: true, piezo: true, sensors: true, observation: true, horizontal: true };
 
 function circleTexture(THREE, color) {
   const c = document.createElement('canvas'); c.width = c.height = 64;
@@ -57,7 +57,7 @@ export function buildScene(THREE, session) {
   const tg = new THREE.BufferGeometry();
   tg.setAttribute('position', new THREE.BufferAttribute(pos, 3)); tg.setAttribute('color', new THREE.BufferAttribute(col, 3)); tg.setIndex(new THREE.BufferAttribute(idx, 1)); tg.computeVertexNormals();
   const terrainMesh = new THREE.Mesh(tg, new THREE.MeshLambertMaterial({ vertexColors: true }));
-  lg('terrain').add(terrainMesh);
+  lg('terrain').add(terrainMesh); lg('contours');
 
   // разломы: поверхности (полупрозрачные) и линии выхода на рельеф (приподняты над рельефом)
   const fSurf = lg('faultSurf'), fAir = lg('faultAir'), fLines = lg('faultLines'), faultMeshes = [];
@@ -77,14 +77,14 @@ export function buildScene(THREE, session) {
         list.forEach((i, n) => { for (let k = 0; k < 9; k += 3) { p[n * 9 + k] = s.tris[i + k] + o.x - cx; p[n * 9 + k + 1] = s.tris[i + k + 2] + o.z - cz; p[n * 9 + k + 2] = -(s.tris[i + k + 1] + o.y - cy); } });
         const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(p, 3)); g.computeVertexNormals();
         const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color, transparent: true, opacity, side: THREE.DoubleSide, depthWrite: false }));
-        m.userData = { kind: 'fault', key: s.key, layer, baseOpacity: opacity }; grp.add(m); faultMeshes.push(m);
+        m.userData = { kind: 'fault', key: s.key, layer, baseOpacity: opacity, baseColor: color.clone() }; grp.add(m); faultMeshes.push(m);
       });
       const seg = session.traces[s.key] || [];
       if (seg.length) {
         const lp = new Float32Array((seg.length / 4) * 6);
         for (let i = 0, j = 0; i < seg.length; i += 4, j += 6) { lp[j] = seg[i] - cx; lp[j + 1] = zAt(seg[i], seg[i + 1]) + 1 - cz; lp[j + 2] = -(seg[i + 1] - cy); lp[j + 3] = seg[i + 2] - cx; lp[j + 4] = zAt(seg[i + 2], seg[i + 3]) + 1 - cz; lp[j + 5] = -(seg[i + 3] - cy); }
         const lgm = new THREE.BufferGeometry(); lgm.setAttribute('position', new THREE.BufferAttribute(lp, 3));
-        fLines.add(new THREE.LineSegments(lgm, new THREE.LineBasicMaterial({ color })));
+        const ls = new THREE.LineSegments(lgm, new THREE.LineBasicMaterial({ color, transparent: true })); ls.userData = { key: s.key, baseColor: color.clone() }; fLines.add(ls);
       }
     });
   }
@@ -122,5 +122,5 @@ export function buildScene(THREE, session) {
   pointsLayer('sensors', pz.flatMap((w) => w.sensors.map((s) => ({ v: v3(s.x, s.y, s.z), color: '#1e3a8a', s: { ...s, well: w.name } }))), white, 9, (it) => ({ kind: 'sensor', item: it.s }));
   // слои, у которых несколько объектов-групп, включаются вместе (маркеры устьев — с линиями)
   const alias = { horizontal: ['horizontal', 'horizontalC'], piezo: ['piezo', 'piezoC'], observation: ['observation', 'observationC'] };
-  return { group, markers, refreshPoints, center: { x: 0, y: 0, z: 0 }, radius, layerGroups, alias, terrainMesh, faultMeshes, cx, cy, cz, zmin: zmin - cz, zmax: zmax - cz, v3, zAt };
+  return { group, markers, refreshPoints, T,  center: { x: 0, y: 0, z: 0 }, radius, layerGroups, alias, terrainMesh, faultMeshes, cx, cy, cz, zmin: zmin - cz, zmax: zmax - cz, v3, zAt };
 }

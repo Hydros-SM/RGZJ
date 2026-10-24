@@ -59,17 +59,28 @@ export function buildSession(rec) {
   const faults = rec.faultsBuf ? unpackFaultsModel(rec.faultsBuf) : null;
   const traces = {};
   if (faults) faults.surfaces.forEach((s) => { traces[s.key] = traceSegments(s, faults.origin, sampler.zAt); });
-  const rows = rec.data.points || [];
-  const measure = rows.filter((p) => p.kind !== 'outflow'), outflows = rows.filter((p) => p.kind === 'outflow');
-  const latest = new Map();
-  measure.forEach((p) => { const c = latest.get(p.point_number); if (!c || String(p.monitoring_date || '') > String(c.monitoring_date || '')) latest.set(p.point_number, p); });
-  const history = new Map();
-  measure.forEach((p) => { if (!history.has(p.point_number)) history.set(p.point_number, []); history.get(p.point_number).push(p); });
-  history.forEach((a) => a.sort((x, y) => String(y.monitoring_date || '').localeCompare(String(x.monitoring_date || ''))));
+  const pv = derivePoints(rec.data, { scope: 'interest', asOf: '' });
   return {
     rec, manifest: rec.manifest, data: rec.data, terrain, sampler, faults, traces,
     mapUrl: rec.mapBlob ? URL.createObjectURL(rec.mapBlob) : null,
-    points: Array.from(latest.values()), history, outflows,
+    points: pv.points, history: pv.history, outflows: pv.outflows,
     fileName: rec.fileName, fileHash: rec.fileHash, importedAt: rec.importedAt,
   };
 }
+
+// Точки замера по настройкам слоя: scope 'interest' — только точки интереса пакета (если они заданы), 'all' — все; asOf — состояние на дату
+export function derivePoints(data, cfg) {
+  const rows = data.points || [], asOf = (cfg && cfg.asOf) || '';
+  const interest = data.interest && cfg && cfg.scope !== 'all' ? new Set(data.interest.map(String)) : null;
+  const okDate = (p) => !asOf || String(p.monitoring_date || '') <= asOf;
+  const parentOf = (p) => String(p.kind === 'outflow' ? p.parent_number : p.point_number);
+  const use = rows.filter((p) => (!interest || interest.has(parentOf(p))) && okDate(p));
+  const measure = use.filter((p) => p.kind !== 'outflow'), outflows = use.filter((p) => p.kind === 'outflow');
+  const latest = new Map(), history = new Map();
+  measure.forEach((p) => { const c = latest.get(p.point_number); if (!c || String(p.monitoring_date || '') > String(c.monitoring_date || '')) latest.set(p.point_number, p); });
+  measure.forEach((p) => { if (!history.has(p.point_number)) history.set(p.point_number, []); history.get(p.point_number).push(p); });
+  history.forEach((a) => a.sort((x, y) => String(y.monitoring_date || '').localeCompare(String(x.monitoring_date || ''))));
+  return { points: Array.from(latest.values()), history, outflows };
+}
+// Копия сессии с точками по настройкам (рельеф, разломы и rec те же — 3D-сцена не перестраивается)
+export function applyPointsView(session, cfg) { return { ...session, ...derivePoints(session.data, cfg) }; }

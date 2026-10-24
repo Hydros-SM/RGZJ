@@ -1,6 +1,6 @@
 // Вкладки «Карта» (подложка — схема карьера) и «Модель» (подложка — рельеф; есть переключатель «План / 3D»): слои и карточка объекта.
 import React, { useEffect, useMemo, useState } from 'react';
-import { Layers, Plus, X } from 'lucide-react';
+import { Layers, Plus, X, Settings } from 'lucide-react';
 import { html } from '../lib/html.js';
 import { LAYERS, DEFAULT_LAYERS } from '../lib/plan-draw.js';
 import { LAYERS_3D, DEFAULT_LAYERS_3D } from '../lib/scene3d.js';
@@ -8,6 +8,7 @@ import { makeRaster } from '../lib/raster.js';
 import { PlanCanvas } from '../components/PlanCanvas.js';
 import { Scene3D } from '../components/Scene3D.js';
 import { InfoSheet } from '../components/InfoSheet.js';
+import { PointsSettings, FaultsSettings, TerrainSettings } from '../components/LayerSettings.js';
 
 function useImage(url) {
   const [img, setImg] = useState(null);
@@ -23,19 +24,25 @@ const ls = (key, def) => { try { return { ...def, ...JSON.parse(localStorage.get
 const lsSet = (key, v) => { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) { /* не критично */ } };
 
 // mode: 'map' | 'model'
-export function PlanPage({ session, mode, focusRequest, placing, onStart, onPlace, onCancelPlace }) {
+const GEAR = { points: 'points', outflows: 'points', faults2d: 'faults', faults3d: 'faults', faultSurf: 'faults', faultAir: 'faults', faultLines: 'faults', terrain: 'terrain', contours: 'terrain' };
+
+export function PlanPage({ session, mode, focusRequest, placing, onStart, onPlace, onCancelPlace, vs, setVs, onReady }) {
   const [layers, setLayers] = useState(() => ls('field-layers-' + mode, mode === 'map' ? { ...DEFAULT_LAYERS, faults2d: true, faults3d: false } : DEFAULT_LAYERS));
   const [layers3d, setLayers3d] = useState(() => ls('field-layers3d', DEFAULT_LAYERS_3D));
   const [view, setView] = useState(() => (mode === 'model' ? (localStorage.getItem('field-view') || 'plan') : 'plan'));
   const [vexag, setVexag] = useState(1);
-  const [terrainOp, setTerrainOp] = useState(0.6);
+  const terrainOp = vs.terrain.opacity, setTerrainOp = (v) => setVs({ ...vs, terrain: { ...vs.terrain, opacity: v } });
   const [viewCmd, setViewCmd] = useState(null);
   const [panel, setPanel] = useState(false);
   const [selected, setSelected] = useState(null);
   const [focus, setFocus] = useState(null);
   const [fab, setFab] = useState(false);
   const [hint, setHint] = useState('');
+  const [dlg, setDlg] = useState('');
   const is3d = mode === 'model' && view === '3d';
+  const [loading3d, setLoading3d] = useState(false);
+  const handleReady = () => { setLoading3d(false); onReady && onReady(); };
+  useEffect(() => { if (is3d) setLoading3d(true); else { const t = setTimeout(handleReady, 0); return () => clearTimeout(t); } return undefined; }, [is3d]);
   const img = useImage(mode === 'map' ? session.mapUrl : null);
   const raster = useMemo(() => (mode === 'model' || (mode === 'map' && !session.mapUrl) ? makeRaster(session.terrain) : null), [session.terrain, session.mapUrl, mode]);
   const base = useMemo(() => {
@@ -57,7 +64,7 @@ export function PlanPage({ session, mode, focusRequest, placing, onStart, onPlac
       : selected.kind === 'outflow' ? session.outflows.find((o) => o.id === it.id) : null;
     return fresh && fresh !== it ? { ...selected, item: fresh } : selected;
   }, [selected, session.points, session.outflows]);
-  const overlay = { data: session.data, layers, points: session.points, outflows: session.outflows, traces: session.traces, faults: session.faults, selected: live };
+  const overlay = { data: session.data, layers, points: session.points, outflows: session.outflows, traces: session.traces, faults: session.faults, fview: vs.faults, selected: live };
   const select = (p) => {
     if (!p) { setSelected(null); return; }
     if (p.kind === 'fault') setSelected({ kind: 'fault', key: p.key });
@@ -69,18 +76,19 @@ export function PlanPage({ session, mode, focusRequest, placing, onStart, onPlac
   const hasFaults = !!session.faults;
   return html`
     <div class="plan-page">
-      ${is3d ? html`<${Scene3D} session=${session} layers=${layers3d} vexag=${vexag} terrainOp=${terrainOp} selected=${live} onPick=${select} focus=${focus} viewCmd=${viewCmd} placing=${!!placing} onPlace=${onPlace} />`
+      ${loading3d && html`<div class="progress"><i /></div><div class="progress-msg">Строю 3D-модель…</div>`}
+      ${is3d ? html`<${Scene3D} session=${session} fview=${vs.faults} tview=${vs.terrain} onReady=${handleReady} layers=${layers3d} vexag=${vexag} terrainOp=${terrainOp} selected=${live} onPick=${select} focus=${focus} viewCmd=${viewCmd} placing=${!!placing} onPlace=${onPlace} />`
         : html`<${PlanCanvas} base=${base} overlay=${overlay} onPick=${select} focus=${focus} placing=${!!placing} onPlace=${onPlace} />`}
       ${mode === 'model' && html`<div class="view-switch">
         <button class=${view === 'plan' ? 'on' : ''} onClick=${() => setView('plan')}>План</button>
         <button class=${view === '3d' ? 'on' : ''} onClick=${() => setView('3d')}>3D</button>
         ${is3d && html`<span class="sep" /><button onClick=${() => setViewCmd({ type: 'fit', n: Date.now() })}>Вся модель</button><button onClick=${() => setViewCmd({ type: 'top', n: Date.now() })}>Сверху</button>
-          <label class="vex">Рельеф<select value=${terrainOp} onChange=${(e) => setTerrainOp(Number(e.target.value))}>${[[1, '100%'], [0.6, '60%'], [0.3, '30%']].map(([v, l]) => html`<option key=${v} value=${v}>${l}</option>`)}</select></label>
+          <label class="vex">Рельеф<select value=${terrainOp} onChange=${(e) => setTerrainOp(Number(e.target.value))}>${[[1, '100%'], [0.6, '60%'], [0.3, '30%']].concat([1, 0.6, 0.3].includes(terrainOp) ? [] : [[terrainOp, Math.round(terrainOp * 100) + '%']]).map(([v, l]) => html`<option key=${v} value=${v}>${l}</option>`)}</select></label>
           <label class="vex">Высота ×<select value=${vexag} onChange=${(e) => setVexag(Number(e.target.value))}>${[1, 1.5, 2, 3, 4].map((v) => html`<option key=${v} value=${v}>${v}</option>`)}</select></label>`}
       </div>`}
       <button class="layers-btn" onClick=${() => setPanel((v) => !v)}><${Layers} size=${18} /> Слои</button>
       ${panel && html`<div class="layers-panel">
-        ${list.filter(([k]) => hasFaults || !/^fault/.test(k)).map(([k, label]) => html`<label key=${k}><input type="checkbox" checked=${cur[k] !== false && !!cur[k]} onChange=${(e) => setCur((l) => ({ ...l, [k]: e.target.checked }))} /> ${label}</label>`)}
+        ${list.filter(([k]) => hasFaults || !/^fault/.test(k)).map(([k, label]) => html`<div key=${k} class="layer-row"><label><input type="checkbox" checked=${cur[k] !== false && !!cur[k]} onChange=${(e) => setCur((l) => ({ ...l, [k]: e.target.checked }))} /> ${label}</label>${GEAR[k] && html`<button class="layer-gear" title="Настройки слоя" onClick=${() => { setDlg(GEAR[k]); setPanel(false); }}><${Settings} size=${17} /></button>`}</div>`)}
       </div>`}
       ${noMap && html`<div class="plan-note">В пакете нет картинки схемы — подложка построена по рельефу.</div>`}
       ${placing && html`<div class="placing-banner"><span>${placing.type === 'outflow' ? 'Коснитесь места, где вода выходит на поверхность (точка №' + placing.parent + ')' : 'Коснитесь места новой точки водопроявления'}${is3d ? ' — на поверхности рельефа' : ''}</span><button class="btn btn-outline" onClick=${onCancelPlace}>Отмена</button></div>`}
@@ -93,6 +101,9 @@ export function PlanPage({ session, mode, focusRequest, placing, onStart, onPlac
         </div>`}
         <button class="fab-main" onClick=${() => setFab((v) => !v)}><${Plus} size=${22} /> Записать</button>
       </div>`}
+      <${PointsSettings} open=${dlg === 'points'} onClose=${() => setDlg('')} session=${session} vs=${vs} setVs=${setVs} />
+      <${TerrainSettings} open=${dlg === 'terrain'} onClose=${() => setDlg('')} session=${session} vs=${vs} setVs=${setVs} />
+      <${FaultsSettings} open=${dlg === 'faults'} onClose=${() => setDlg('')} session=${session} vs=${vs} setVs=${setVs} />
       <${InfoSheet} session=${session} selected=${live} onClose=${() => setSelected(null)} onSelect=${setSelected} onAction=${onStart} />
     </div>`;
 }

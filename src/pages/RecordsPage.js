@@ -14,7 +14,7 @@ export function RecordsPage({ work, onEdit, onDelete }) {
       ${!recs.length && html`<div class="empty">Записей пока нет. На вкладке «Карта» или «Модель» нажмите «Записать».</div>`}
       ${recs.map((r) => html`
         <div class="rec-row" key=${r.id}>
-          <div class="main"><b>${TYPE[r.type] || r.type} · ${r.type === 'outflow' ? r.point_number + ' (точка №' + r.parent_number + ')' : '№' + r.point_number}</b>
+          <div class="main"><b>${r.edit ? 'Правка' + (r.type === 'outflow' ? ' выхода' : ' точки') : (TYPE[r.type] || r.type)} · ${r.type === 'outflow' ? r.point_number + ' (точка №' + r.parent_number + ')' : '№' + r.point_number}</b>
             <span>${fmtDate(r.fields.monitoring_date)} · ${r.fields.status || '—'}${r.fields.flow_rate != null ? ' · ' + Number(r.fields.flow_rate).toFixed(3) + ' л/с' : ''}${r.x != null ? ' · X ' + Number(r.x).toFixed(1) + ' / Y ' + Number(r.y).toFixed(1) : ''}${r.z != null ? ' · Z ' + Number(r.z).toFixed(1) : ''}${(r.photos || []).length ? ' · фото: ' + r.photos.length : ''}</span>
             ${r.fields.comment && html`<span>«${r.fields.comment}»</span>`}</div>
           <button class="btn btn-outline" onClick=${() => onEdit(r.id)}><${Pencil} size=${16} /> Изменить</button>

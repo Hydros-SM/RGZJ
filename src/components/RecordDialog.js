@@ -45,22 +45,22 @@ export function RecordDialog({ open, draft, onChange, onSave, onClose, onRepick,
     if (draft.type !== 'measure' && (!Number.isFinite(x) || !Number.isFinite(y))) { setError('Укажите положение на карте (X и Y)'); return; }
     if (z != null && !Number.isFinite(z)) { setError('Z должна быть числом'); return; }
     const used = new Set(); (work.records || []).forEach((r) => { if (r.id !== draft.id && (r.type === draft.type || (draft.type !== 'outflow' && r.type !== 'outflow'))) used.add(r.point_number); });
-    if (draft.type === 'point' && (session.points.some((p) => String(p.point_number) === num && !p._field) || used.has(num))) { setError('Точка с номером «' + num + '» уже есть. Для нового замера существующей точки используйте «Новый замер».'); return; }
-    if (isOut && (session.outflows.some((o) => o.point_number === num && !o._field) || used.has(num))) { setError('Выход «' + num + '» уже есть'); return; }
+    if (draft.type === 'point' && !draft.edit && (session.points.some((p) => String(p.point_number) === num && !p._field) || used.has(num))) { setError('Точка с номером «' + num + '» уже есть. Для нового замера существующей точки используйте «Новый замер».'); return; }
+    if (isOut && !draft.edit && (session.outflows.some((o) => o.point_number === num && !o._field) || used.has(num))) { setError('Выход «' + num + '» уже есть'); return; }
     if (!isOut && fl.mode === 'direct' && fl.value !== '' && calcLs == null) { setError('Дебит должен быть числом'); return; }
     (draft._removed || []).forEach((id) => deletePhoto(id));
     added.current = [];
     const fields = { ...f, monitoring_date: f.monitoring_date || todayIso() };
     if (!isOut) fields.flow_rate = calcLs != null ? Math.round(calcLs * 1000) / 1000 : null;
     if (fields.worker) { try { localStorage.setItem('field-worker', fields.worker); } catch (e2) { /* не критично */ } }
-    onSave({ id: draft.id || newId(), type: draft.type, point_number: num, parent_number: draft.parent_number, x: draft.type === 'measure' ? undefined : x, y: draft.type === 'measure' ? undefined : y, z: z, fields, flow: fl, photos: draft.photos || [], createdAt: draft.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString() });
+    onSave({ id: draft.id || newId(), type: draft.type, edit: !!draft.edit, point_number: num, parent_number: draft.parent_number, x: draft.type === 'measure' ? undefined : x, y: draft.type === 'measure' ? undefined : y, z: z, fields, flow: fl, photos: draft.photos || [], createdAt: draft.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString() });
   }
 
   return html`
-    <${Dialog} open=${open} onClose=${cancel} title=${(draft.id && !draft._new ? 'Изменить: ' : '') + TITLES[draft.type] + (isOut ? ' · точка №' + draft.parent_number : '')} width="min(760px, 98vw)"
+    <${Dialog} open=${open} onClose=${cancel} title=${(draft.edit || (draft.id && !draft._new) ? 'Изменить: ' : '') + TITLES[draft.type] + (isOut ? ' · точка №' + draft.parent_number : '')} width="min(760px, 98vw)"
       footer=${html`${error && html`<div class="rf-err">${error}</div>`}<${Button} variant="outline" onClick=${cancel}>Отмена<//><${Button} onClick=${save} disabled=${busy}>Сохранить<//>`}>
       <div class="rf-grid">
-        <${Lbl} t=${isOut ? '№ выхода *' : '№ точки *'}><input class="input" value=${draft.point_number} disabled=${isMeasure} onInput=${(e) => set({ point_number: e.target.value })} /><//>
+        <${Lbl} t=${isOut ? '№ выхода *' : '№ точки *'}><input class="input" value=${draft.point_number} disabled=${isMeasure || !!draft.edit} onInput=${(e) => set({ point_number: e.target.value })} /><//>
         <${Lbl} t="Дата"><input class="input" type="date" value=${f.monitoring_date || ''} onInput=${(e) => setF({ monitoring_date: e.target.value })} /><//>
         ${!isOut && html`<${Lbl} t="Сотрудник"><input class="input" value=${f.worker || ''} onInput=${(e) => setF({ worker: e.target.value })} /><//>`}
         <${Lbl} t="Статус"><select class="input" value=${f.status || ''} onChange=${(e) => setF({ status: e.target.value })}>${Object.keys(POINT_STATUSES).map((s) => html`<option key=${s} value=${s}>${s}</option>`)}</select><//>

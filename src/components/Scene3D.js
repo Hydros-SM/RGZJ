@@ -1,15 +1,16 @@
 // 3D-вид модели карьера (three.js): вращение одним пальцем, масштаб и сдвиг двумя, выбор касанием. Библиотека подгружается по требованию
 // (при первом запуске с интернетом попадает в офлайн-кэш, см. main.js). Содержимое строит lib/scene3d.js.
+import { styleTerrain } from '../lib/terrain3d.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { html } from '../lib/html.js';
 import { buildScene } from '../lib/scene3d.js';
 
 const visKey = (k) => k.replace(/C$/, '');
 
-export function Scene3D({ session, layers, vexag, terrainOp = 0.6, selected, onPick, focus, viewCmd, placing, onPlace }) {
+export function Scene3D({ session, fview, tview, onReady, layers, vexag, terrainOp = 0.6, selected, onPick, focus, viewCmd, placing, onPlace }) {
   const wrapRef = useRef(null);
   const S = useRef({});
-  const props = useRef({}); props.current = { session, layers, vexag, terrainOp, selected, onPick, placing, onPlace };
+  const props = useRef({}); props.current = { session, fview, tview, layers, vexag, terrainOp, selected, onPick, placing, onPlace };
   const [state, setState] = useState('loading'); // loading | ready | error
   const [errMsg, setErrMsg] = useState('');
 
@@ -22,10 +23,26 @@ export function Scene3D({ session, layers, vexag, terrainOp = 0.6, selected, onP
     tm.transparent = op < 0.99; tm.opacity = op; tm.depthWrite = op >= 0.99; tm.needsUpdate = true; s.B.terrainMesh.renderOrder = 1; s.B.faultMeshes.forEach((m) => { m.renderOrder = 2; });
     render();
   }
+  function applyTerrain() {
+    const s = S.current; if (!s.B) return;
+    const tv = props.current.tview || {};
+    styleTerrain(s.THREE, s.B, props.current.session, tv, s.mapTex || null, props.current.layers.contours !== false);
+    applyLayers();
+  }
+  function loadMapTexture() { // картинка схемы — на рельеф (по границам схемы)
+    const s = S.current, url = props.current.session.mapUrl; if (!s.B || !url) return;
+    new s.THREE.TextureLoader().load(url, (tex) => { if (!S.current.B) return; tex.colorSpace = s.THREE.SRGBColorSpace; tex.anisotropy = 8; S.current.mapTex = tex; applyTerrain(); });
+  }
   function applySelection() {
     const s = S.current; if (!s.B) return;
     const sel = props.current.selected;
-    s.B.faultMeshes.forEach((m) => { const on = sel && sel.kind === 'fault' && sel.key === m.userData.key; m.material.opacity = on ? 0.8 : m.userData.baseOpacity; m.material.emissive && m.material.emissive.set(on ? '#f59e0b' : '#000000'); });
+    const fv = props.current.fview || {}, hid = new Set(fv.hidden || []), fo = fv.lineOpacity != null ? fv.lineOpacity : 1, so = fv.surfOpacity != null ? fv.surfOpacity : 0.4;
+    s.B.faultMeshes.forEach((m) => {
+      const on = sel && sel.kind === 'fault' && sel.key === m.userData.key;
+      m.visible = !hid.has(m.userData.key); m.material.color.copy(fv.color ? new s.THREE.Color(fv.color) : m.userData.baseColor);
+      m.material.opacity = on ? 0.8 : Math.min(1, m.userData.baseOpacity * so / 0.4); m.material.emissive && m.material.emissive.set(on ? '#f59e0b' : '#000000');
+    });
+    s.B.layerGroups.faultLines && s.B.layerGroups.faultLines.children.forEach((l) => { l.visible = !hid.has(l.userData.key); l.material.color.copy(fv.color ? new s.THREE.Color(fv.color) : l.userData.baseColor); l.material.opacity = fo; });
     if (s.ring) { s.B.group.remove(s.ring); s.ring.geometry.dispose(); s.ring = null; }
     const m = sel && sel.kind !== 'fault' ? s.B.markers.find((x) => x.kind === sel.kind && (x.item === sel.item || (sel.kind === 'point' && x.item.point_number === sel.item.point_number) || (sel.kind === 'outflow' && x.item.id === sel.item.id))) : null;
     if (m) {
@@ -93,7 +110,8 @@ export function Scene3D({ session, layers, vexag, terrainOp = 0.6, selected, onP
           }
           P.onPick && P.onPick(null);
         });
-        applyLayers(); applySelection(); setState('ready');
+        applyLayers(); applySelection(); setState('ready'); applyTerrain(); loadMapTexture();
+        onReady && onReady();
       } catch (e) {
         console.error(e);
         if (!disposed) { setErrMsg(String(e && e.message ? e.message : e)); setState('error'); }
@@ -108,8 +126,9 @@ export function Scene3D({ session, layers, vexag, terrainOp = 0.6, selected, onP
   }, [session.rec]);
 
   useEffect(() => { const s = S.current; if (s.B && s.B.refreshPoints) { s.B.refreshPoints(session); applyLayers(); applySelection(); } }, [session.points, session.outflows]);
+  useEffect(() => { applyTerrain(); }, [tview && tview.colorMode, tview && tview.flat, tview && tview.step, tview && tview.labels, layers.contours]);
   useEffect(() => { applyLayers(); }, [layers, vexag, terrainOp]);
-  useEffect(() => { applySelection(); }, [selected]);
+  useEffect(() => { applySelection(); }, [selected, fview]);
   useEffect(() => {
     const s = S.current; if (!s.B || !viewCmd) return;
     const { camera, controls, B } = s;

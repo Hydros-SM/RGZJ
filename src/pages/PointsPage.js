@@ -11,12 +11,16 @@ const fmtDate = (d) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d || ''); ret
 export function PointsPage({ session, onShowOnMap }) {
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
+  const [domain, setDomain] = useState('');
+  const [wall, setWall] = useState('');
   const [selected, setSelected] = useState(null);
   const rows = useMemo(() => {
     const s = q.trim().toLowerCase();
-    return session.points.filter((p) => (!status || p.status === status) && (!s || [p.point_number, p.worker, p.domain, p.wall, p.comment, p.horizon].join(' ').toLowerCase().includes(s)))
+    return session.points.filter((p) => (!status || p.status === status) && (!domain || p.domain === domain) && (!wall || p.wall === wall) && (!s || [p.point_number, p.worker, p.domain, p.wall, p.comment, p.horizon].join(' ').toLowerCase().includes(s)))
       .sort((a, b) => String(a.point_number).localeCompare(String(b.point_number), 'ru', { numeric: true }));
-  }, [session, q, status]);
+  }, [session, q, status, domain, wall]);
+  const opts = (key) => Array.from(new Set(session.points.map((p) => p[key]).filter(Boolean))).sort((a, b) => String(a).localeCompare(String(b), 'ru', { numeric: true }));
+  const domains = useMemo(() => opts('domain'), [session.points]), walls = useMemo(() => opts('wall'), [session.points]);
   const exitsOf = (n) => session.outflows.filter((o) => o.parent_number === n).length;
   return html`
     <div class="points-page">
@@ -24,6 +28,8 @@ export function PointsPage({ session, onShowOnMap }) {
         <div class="points-filters">
           <label class="search"><${Search} size=${16} /><input class="input" placeholder="Поиск: номер, сотрудник, домен…" value=${q} onInput=${(e) => setQ(e.target.value)} /></label>
           <select class="input" value=${status} onChange=${(e) => setStatus(e.target.value)}><option value="">Все статусы</option>${Object.keys(POINT_STATUSES).map((s) => html`<option key=${s} value=${s}>${s}</option>`)}</select>
+          <select class="input" value=${domain} onChange=${(e) => setDomain(e.target.value)}><option value="">Все домены</option>${domains.map((s) => html`<option key=${s} value=${s}>${s}</option>`)}</select>
+          <select class="input" value=${wall} onChange=${(e) => setWall(e.target.value)}><option value="">Все борта</option>${walls.map((s) => html`<option key=${s} value=${s}>${s}</option>`)}</select>
           <span class="count">${rows.length} из ${session.points.length}</span>
         </div>
         <div class="points-scroll">
