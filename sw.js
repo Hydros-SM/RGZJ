@@ -1,7 +1,9 @@
 // Офлайн-кэш полевой платформы. Первый запуск с интернетом сохраняет код приложения и библиотеки (CDN) в кэш браузера; дальше всё открывается
 // без сети. Стратегия — «кэш сначала, обновление в фоне»: новая версия кода подхватывается при следующем запуске с интернетом.
+// Запросы первой загрузки страницы Service Worker перехватить не успевает, поэтому страница после загрузки присылает список всего, что ей
+// понадобилось (сообщение cache-urls), и мы дозагружаем это в кэш: хватает ОДНОГО запуска с интернетом.
 // Данные полевой работы лежат не здесь, а в IndexedDB (src/store.js) и в кэш не попадают.
-const VERSION = 'field-v1';
+const VERSION = 'field-v2';
 const SHELL = [
   './', './index.html', './manifest.webmanifest', './public/icon.svg',
   './src/main.js', './src/App.js', './src/store.js',
@@ -14,6 +16,22 @@ self.addEventListener('install', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
 });
+
+self.addEventListener('message', (e) => {
+  const d = e.data;
+  if (!d || d.type !== 'cache-urls' || !Array.isArray(d.urls)) return;
+  const port = e.source;
+  e.waitUntil((async () => {
+    const cache = await caches.open(VERSION);
+    let added = 0, failed = 0;
+    for (const u of d.urls) {
+      if (!/^https?:/.test(u) || (await cache.match(u))) continue;
+      try { const res = await fetch(u); if (res && (res.ok || res.type === 'opaque')) { await cache.put(u, res); added++; } else failed++; } catch (err) { failed++; }
+    }
+    if (port && port.postMessage) port.postMessage({ type: 'cache-done', added, failed });
+  })());
+});
+
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET' || !/^https?:/.test(req.url)) return;
