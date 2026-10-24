@@ -2,16 +2,19 @@
 // без сети. Стратегия — «кэш сначала, обновление в фоне»: новая версия кода подхватывается при следующем запуске с интернетом.
 // Запросы первой загрузки страницы Service Worker перехватить не успевает, поэтому страница после загрузки присылает список всего, что ей
 // понадобилось (сообщение cache-urls), и мы дозагружаем это в кэш: хватает ОДНОГО запуска с интернетом.
-// Данные полевой работы лежат не здесь, а в IndexedDB (src/store.js) и в кэш не попадают.
-const VERSION = 'field-v2';
+// Все запросы SW к сети идут в обход HTTP-кэша браузера (GitHub Pages разрешает кэшировать файлы на 10 минут, и без этого обновление приложения
+// подтягивало бы устаревшие копии). Данные полевой работы лежат не здесь, а в IndexedDB (src/store.js) и в кэш не попадают.
+const VERSION = 'field-v3';
 const SHELL = [
   './', './index.html', './manifest.webmanifest', './public/icon.svg',
   './src/main.js', './src/App.js', './src/store.js',
   './src/styles/tokens.css', './src/styles/ui.css', './src/styles/field.css',
 ];
 
+const fresh = (u) => fetch(u, { cache: 'reload' });
+
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => Promise.all(SHELL.map((u) => c.add(u).catch(() => null)))).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(VERSION).then((c) => Promise.all(SHELL.map((u) => fresh(u).then((res) => (res && res.ok ? c.put(u, res) : null)).catch(() => null)))).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
@@ -26,7 +29,7 @@ self.addEventListener('message', (e) => {
     let added = 0, failed = 0;
     for (const u of d.urls) {
       if (!/^https?:/.test(u) || (await cache.match(u))) continue;
-      try { const res = await fetch(u); if (res && (res.ok || res.type === 'opaque')) { await cache.put(u, res); added++; } else failed++; } catch (err) { failed++; }
+      try { const res = await fetch(u, { cache: 'reload' }); if (res && (res.ok || res.type === 'opaque')) { await cache.put(u, res); added++; } else failed++; } catch (err) { failed++; }
     }
     if (port && port.postMessage) port.postMessage({ type: 'cache-done', added, failed });
   })());
@@ -38,7 +41,7 @@ self.addEventListener('fetch', (e) => {
   e.respondWith((async () => {
     const cache = await caches.open(VERSION);
     const hit = await cache.match(req, { ignoreSearch: false });
-    const net = fetch(req).then((res) => { if (res && (res.ok || res.type === 'opaque')) cache.put(req, res.clone()).catch(() => null); return res; }).catch(() => null);
+    const net = fetch(req, { cache: 'no-cache' }).then((res) => { if (res && (res.ok || res.type === 'opaque')) cache.put(req, res.clone()).catch(() => null); return res; }).catch(() => null);
     if (hit) { net.catch(() => null); return hit; }
     const res = await net;
     if (res) return res;
