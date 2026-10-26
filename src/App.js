@@ -10,9 +10,10 @@ import { PlanPage } from './pages/PlanPage.js';
 import { PointsPage } from './pages/PointsPage.js';
 import { RecordsPage } from './pages/RecordsPage.js';
 import { PackagePage } from './pages/PackagePage.js';
+import { loadExportLog, pendingCount } from './lib/export.js';
 import { RecordDialog } from './components/RecordDialog.js';
 
-export const APP_VERSION = 'v0.4.2 (точки интереса, обновление)';
+export const APP_VERSION = 'v0.5.0 (выгрузка результатов)';
 const TABS = [['map', 'Карта', MapIcon], ['points', 'Список точек', ListChecks], ['model', 'Модель', Box], ['records', 'Записи', ClipboardList], ['package', 'Пакет', PackageOpen]];
 const DEFAULT_FLOW = { mode: 'direct', unit: 'ls', value: '', volume: '', time: '' };
 const r2 = (v) => Math.round(v * 100) / 100;
@@ -21,6 +22,7 @@ const worker = () => { try { return localStorage.getItem('field-worker') || ''; 
 export function App() {
   const [session, setSession] = useState(undefined); // undefined — читаем хранилище, null — пакета нет
   const [work, setWork] = useState({ records: [] });
+  const [exportLog, setExportLog] = useState({ items: [] });
   const [tab, setTab] = useState('package');
   const [focusReq, setFocusReq] = useState(null);
   const [online, setOnline] = useState(navigator.onLine);
@@ -34,7 +36,7 @@ export function App() {
   const setView = (v) => { setViewState(v); saveView(v); };
 
   useEffect(() => {
-    Promise.all([loadStoredSession(), loadWork()]).then(([s, w]) => { setWork(w); setSession(s); if (s) setTab('map'); }).catch((e) => { console.error(e); setSession(null); });
+    Promise.all([loadStoredSession(), loadWork(), loadExportLog()]).then(([s, w, l]) => { setWork(w); setExportLog(l); setSession(s); if (s) setTab('map'); }).catch((e) => { console.error(e); setSession(null); });
     const on = () => setOnline(true), off = () => setOnline(false);
     window.addEventListener('online', on); window.addEventListener('offline', off);
     return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
@@ -112,13 +114,14 @@ export function App() {
     await persist(work.records.filter((r) => r.id !== id)); setToast('Запись удалена');
   }
   async function wipeAll() {
-    const n = work.records.length;
-    if (!confirm(n ? 'На планшете ' + n + ' полевых записей, которые ещё не выгружены. Удалить пакет И эти записи без возможности восстановления?' : 'Удалить пакет и данные полевой работы с этого планшета?')) return;
+    const n = pendingCount(work, exportLog);
+    if (!confirm(n ? 'На планшете ' + n + ' полевых записей, которые ещё не выгружены (или изменены после выгрузки). Удалить пакет И эти записи без возможности восстановления?' : 'Удалить пакет и данные полевой работы с этого планшета?')) return;
     await clearWork(); await clearSession(); setWork({ records: [] }); onSession(null);
   }
   function repick() { const d = dlg.draft; setPlacing({ type: d.type, parent: d.parent_number, draft: d }); setDlg({ open: false, draft: d }); }
   function closeDlg() { setDlg({ open: false, draft: null }); }
 
+  const pending = pendingCount(work, exportLog);
   const need = !session && tab !== 'package';
   const sessionProps = eff || session;
   return html`
@@ -126,17 +129,17 @@ export function App() {
       ${loading && html`<div class="progress progress-top"><i /></div>`}
       <header class="field-top">
         <div class="brand"><b>Полевая платформа</b><span>${session ? session.manifest.quarry + ' · схема ' + (session.manifest.scheme && session.manifest.scheme.weekKey) : 'пакет не загружен'}</span></div>
-        <nav class="tabs">${TABS.map(([k, label, Icon]) => html`<button key=${k} class=${'tab' + (tab === k ? ' active' : '')} disabled=${!session && k !== 'package'} onClick=${() => go(k)}><${Icon} size=${20} /><span>${label}${k === 'records' && work.records.length ? ' (' + work.records.length + ')' : ''}</span></button>`)}</nav>
+        <nav class="tabs">${TABS.map(([k, label, Icon]) => html`<button key=${k} class=${'tab' + (tab === k ? ' active' : '')} disabled=${!session && k !== 'package'} onClick=${() => go(k)}><${Icon} size=${20} /><span>${label}${k === 'records' && work.records.length ? ' (' + work.records.length + (pending ? ', новых ' + pending : '') + ')' : ''}</span></button>`)}</nav>
         ${offlineReady && html`<div class="net on" title="Код приложения сохранён на устройстве: оно откроется и без интернета">готово без сети ✓</div>`}
         <div class=${'net ' + (online ? 'on' : 'off')} title=${online ? 'Есть интернет' : 'Нет интернета — работаем офлайн'}>${online ? 'онлайн' : 'офлайн'}</div>
       </header>
       <main class="field-main">
         ${session === undefined && html`<div class="empty">Читаю данные планшета…</div>`}
-        ${session !== undefined && (need || tab === 'package') && html`<${PackagePage} session=${session} onSession=${onSession} workCount=${work.records.length} onWipe=${wipeAll} />`}
+        ${session !== undefined && (need || tab === 'package') && html`<${PackagePage} session=${session} onSession=${onSession} workCount=${pending} onWipe=${wipeAll} />`}
         ${session && tab === 'map' && html`<${PlanPage} key="map" session=${sessionProps} mode="map" focusRequest=${focusReq} placing=${placing} onStart=${start} onPlace=${onPlace} onCancelPlace=${() => setPlacing(null)} vs=${view} setVs=${setView} onReady=${() => setLoading(false)} />`}
         ${session && tab === 'model' && html`<${PlanPage} key="model" session=${sessionProps} mode="model" focusRequest=${focusReq} placing=${placing} onStart=${start} onPlace=${onPlace} onCancelPlace=${() => setPlacing(null)} vs=${view} setVs=${setView} onReady=${() => setLoading(false)} />`}
         ${session && tab === 'points' && html`<${PointsPage} session=${sessionProps} onShowOnMap=${showOnMap} />`}
-        ${session && tab === 'records' && html`<${RecordsPage} work=${work} onEdit=${(id) => start({ edit: id })} onDelete=${removeRecord} />`}
+        ${session && tab === 'records' && html`<${RecordsPage} session=${session} work=${work} log=${exportLog} onLogged=${setExportLog} appVersion=${APP_VERSION} onEdit=${(id) => start({ edit: id })} onDelete=${removeRecord} />`}
       </main>
       ${eff && html`<${RecordDialog} open=${dlg.open} draft=${dlg.draft} onChange=${(d) => setDlg({ open: true, draft: d })} onSave=${saveRecord} onClose=${closeDlg} onRepick=${repick} session=${eff} work=${work} busy=${busy} />`}
       ${toast && html`<div class="toast">${toast}</div>`}

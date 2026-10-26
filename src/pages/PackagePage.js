@@ -32,7 +32,7 @@ export function PackagePage({ session, onSession, workCount = 0, onWipe }) {
   function onPick(e) {
     const f = e.target.files && e.target.files[0]; e.target.value = '';
     if (!f) return;
-    const warn = workCount ? '\n\nПолевые записи (' + workCount + ') останутся на планшете и добавятся к новому пакету. Если новый пакет — для другого карьера или другой недели, сначала выгрузите записи.' : '';
+    const warn = workCount ? '\n\nПолевые записи (' + workCount + ', не выгружены или изменены после выгрузки) останутся на планшете и добавятся к новому пакету. Если новый пакет — для другого карьера или другой недели, сначала выгрузите записи (вкладка «Записи»).' : '';
     if (session && !confirm('Пакет на планшете будет заменён файлом «' + f.name + '».' + warn + '\n\nПродолжить?')) return;
     setFile(f); setNeedPw(false); setPw(''); doImport(f, null);
   }
@@ -83,7 +83,7 @@ export function PackagePage({ session, onSession, workCount = 0, onWipe }) {
           <input type="password" class="input" placeholder="Пароль" value=${pw} onInput=${(e) => setPw(e.target.value)} onKeyDown=${(e) => { if (e.key === 'Enter' && pw) doImport(file, pw); }} />
           <button class="btn btn-primary" disabled=${busy || !pw} onClick=${() => doImport(file, pw)}>Открыть</button></div>`}
         ${error && html`<div class="err">${error}</div>`}
-        <p class="hint">Фиксация новых точек и выходов воды, фото и экспорт результатов появятся на следующих этапах разработки.</p>`}
+        <p class="hint">Новые точки, замеры, выходы воды и фото записываются на вкладках «Карта» и «Модель»; выгрузка результатов — на вкладке «Записи».</p>`}
       <input ref=${fileRef} type="file" accept=".gfield,.zip,application/zip,application/octet-stream" style=${{ display: 'none' }} onChange=${onPick} />
     </div>`;
 }
