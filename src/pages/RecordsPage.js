@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { Pencil, Trash2, Download, Share2, Table, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { html } from '../lib/html.js';
-import { buildResult, verifyResult, saveBlob, canShareFile, shareFile, recordStates, addExportLog } from '../lib/export.js';
+import { buildResult, verifyResult, saveBlob, canShareFile, shareFile, recordStates, addExportLog, canPickSave, saveWithVerify } from '../lib/export.js';
 
 const TYPE = { point: 'Новая точка', measure: 'Новый замер', outflow: 'Выход воды' };
 const STATE = { new: ['не выгружена', '#b45309'], changed: ['изменена после выгрузки', '#b45309'], done: ['выгружена', '#15803d'] };
@@ -36,6 +36,14 @@ export function RecordsPage({ session, work, log, onLogged, onEdit, onDelete, ap
     await onLogged(await addExportLog(log, item));
   }
   async function doSave() { saveBlob(res.blob, res.fileName); await logIt('save'); setMsg('Файл сохранён в загрузки планшета: ' + res.fileName); }
+  async function doSaveAs() {
+    setError(''); setMsg('');
+    try {
+      const r = await saveWithVerify(res.blob, res.fileName);
+      if (!r.ok) { setError('Файл записан неправильно: на носителе ' + r.size + ' байт вместо ' + r.expected + ' или содержимое не совпало. Носитель неисправен — не используйте его, выберите другое место или другой способ передачи.'); return; }
+      await logIt('save-as'); setMsg('Файл записан и проверен (прочитан обратно, ' + r.size + ' байт): ' + r.name + '.');
+    } catch (e) { if (e && e.name !== 'AbortError') setError('Не удалось записать: ' + (e.message || e)); }
+  }
   async function doShare() {
     try { await shareFile(res.blob, res.fileName, 'Результаты полевой работы'); await logIt('share'); setMsg('Файл отправлен: ' + res.fileName); }
     catch (e) { if (e && e.name !== 'AbortError') setError('Не удалось отправить: ' + (e.message || e) + '. Сохраните файл и перенесите вручную.'); }
@@ -65,7 +73,8 @@ export function RecordsPage({ session, work, log, onLogged, onEdit, onDelete, ap
               : html`<div class="err"><${AlertTriangle} size=${15} /> Файл не прошёл проверку (${check.error}). Не используйте его, нажмите «Подготовить файл» ещё раз.</div>`)}
             ${res.missing.length > 0 && html`<div class="err">Не найдено фото: ${res.missing.length} (записи выгрузятся без них).</div>`}
             <div style=${{ display: 'flex', gap: '10px', marginTop: '10px', flexWrap: 'wrap' }}>
-              <button class="btn btn-primary" disabled=${!check || !check.ok} onClick=${doSave}><${Download} size=${16} /> Сохранить файл</button>
+              ${canPickSave() && html`<button class="btn btn-primary" disabled=${!check || !check.ok} onClick=${doSaveAs}><${Download} size=${16} /> Сохранить в… (флешка, OneDrive) с проверкой</button>`}
+              <button class=${'btn ' + (canPickSave() ? 'btn-outline' : 'btn-primary')} disabled=${!check || !check.ok} onClick=${doSave}><${Download} size=${16} /> Сохранить в загрузки</button>
               ${check && check.ok && canShareFile(res.blob, res.fileName) && html`<button class="btn btn-outline" onClick=${doShare}><${Share2} size=${16} /> Отправить…</button>`}
               <button class="btn btn-outline" onClick=${() => saveBlob(res.csv, res.csvName)}><${Table} size=${16} /> Таблица для Excel (.csv)</button>
             </div>

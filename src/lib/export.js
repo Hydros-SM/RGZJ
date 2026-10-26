@@ -87,3 +87,16 @@ export function canShareFile(blob, name) {
 export async function shareFile(blob, name, title) {
   await navigator.share({ files: [new File([blob], name, { type: blob.type })], title: title || name });
 }
+
+// Сохранение в выбранное место (флешка, папка OneDrive) с проверкой: после записи файл читается обратно и сверяется с исходным.
+// Нужен браузер с showSaveFilePicker (Edge/Chrome на Windows). Проверка ловит порчу при записи на неисправную флешку прямо на планшете.
+export const canPickSave = () => typeof window !== 'undefined' && typeof window.showSaveFilePicker === 'function';
+async function sha(blob) { const h = new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer())); return Array.from(h).map((b) => b.toString(16).padStart(2, '0')).join(''); }
+export async function saveWithVerify(blob, name) {
+  const handle = await window.showSaveFilePicker({ suggestedName: name, types: [{ description: 'Результаты полевой работы (JSON)', accept: { 'application/json': ['.json'] } }] });
+  const w = await handle.createWritable(); await w.write(blob); await w.close();
+  const back = await handle.getFile();
+  const sameSize = back.size === blob.size;
+  let sameHash = false; try { sameHash = sameSize && (await sha(back)) === (await sha(blob)); } catch (e) { sameHash = sameSize; }
+  return { ok: sameSize && sameHash, name: handle.name, size: back.size, expected: blob.size };
+}

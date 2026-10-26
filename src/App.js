@@ -13,7 +13,7 @@ import { PackagePage } from './pages/PackagePage.js';
 import { loadExportLog, pendingCount } from './lib/export.js';
 import { RecordDialog } from './components/RecordDialog.js';
 
-export const APP_VERSION = 'v0.5.1 (выгрузка: обычный файл JSON)';
+export const APP_VERSION = 'v0.5.2 (сохранение с проверкой)';
 const TABS = [['map', 'Карта', MapIcon], ['points', 'Список точек', ListChecks], ['model', 'Модель', Box], ['records', 'Записи', ClipboardList], ['package', 'Пакет', PackageOpen]];
 const DEFAULT_FLOW = { mode: 'direct', unit: 'ls', value: '', volume: '', time: '' };
 const r2 = (v) => Math.round(v * 100) / 100;
