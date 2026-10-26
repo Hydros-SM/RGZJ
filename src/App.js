@@ -13,7 +13,7 @@ import { PackagePage } from './pages/PackagePage.js';
 import { loadExportLog, pendingCount } from './lib/export.js';
 import { RecordDialog } from './components/RecordDialog.js';
 
-export const APP_VERSION = 'v0.5.2 (сохранение с проверкой)';
+export const APP_VERSION = 'v0.5.3 (переименование точки переносит её выходы)';
 const TABS = [['map', 'Карта', MapIcon], ['points', 'Список точек', ListChecks], ['model', 'Модель', Box], ['records', 'Записи', ClipboardList], ['package', 'Пакет', PackageOpen]];
 const DEFAULT_FLOW = { mode: 'direct', unit: 'ls', value: '', volume: '', time: '' };
 const r2 = (v) => Math.round(v * 100) / 100;
@@ -103,9 +103,16 @@ export function App() {
   }
   async function saveRecord(rec) {
     setBusy(true);
-    const exists = work.records.some((r) => r.id === rec.id);
-    await persist(exists ? work.records.map((r) => (r.id === rec.id ? rec : r)) : [...work.records, rec]);
-    setBusy(false); setDlg({ open: false, draft: null }); setToast('Запись сохранена на планшете');
+    const prev = work.records.find((r) => r.id === rec.id);
+    let records = prev ? work.records.map((r) => (r.id === rec.id ? rec : r)) : [...work.records, rec];
+    // новую точку переименовали — её выходы воды («N-В1») переезжают на новый номер, иначе они остались бы привязаны к несуществующей точке
+    const from = prev ? String(prev.point_number) : '', to = String(rec.point_number);
+    let moved = 0;
+    if (prev && rec.type === 'point' && !rec.edit && from !== to) {
+      records = records.map((r) => { if (r.type !== 'outflow' || r.edit || String(r.parent_number) !== from) return r; moved++; return { ...r, parent_number: to, point_number: to + String(r.point_number).slice(from.length), updatedAt: new Date().toISOString() }; });
+    }
+    await persist(records);
+    setBusy(false); setDlg({ open: false, draft: null }); setToast('Запись сохранена на планшете' + (moved ? '; выходов воды перенесено на новый номер: ' + moved : ''));
   }
   async function removeRecord(id) {
     const rec = work.records.find((r) => r.id === id); if (!rec) return;
