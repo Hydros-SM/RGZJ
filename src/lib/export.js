@@ -1,13 +1,10 @@
-// Выгрузка результатов полевой работы в файл .gresult (ZIP; при пароле зашифрован так же, как пакет .gfield).
-// Состав: manifest.json (откуда записи: хеш пакета, карьер, неделя, кто и когда выгрузил, состав),
-// records.json (записи как есть), records.csv (то же в виде таблицы для Excel), photos/<id>.jpg (фото к записям).
+// Выгрузка результатов полевой работы: один обычный текстовый файл JSON (без архива и шифрования) — записи, сведения о пакете и фото
+// (фото внутри файла в виде base64). Текст не портится при копировании через флешку, почту и мессенджеры. Рядом — таблица CSV для Excel.
 // Журнал выгрузок хранится на планшете: по нему видно, какие записи уже выгружены, а какие новые или изменены после выгрузки.
-import { zipPack, sha256Hex } from './zip-pack.js';
-import { encryptBytes } from './field-crypto.js';
 import { getPhoto } from './work.js';
 import { kvGet, kvSet } from '../store.js';
 
-export const RESULT_FORMAT = { format: 'gfield-result', version: 1 };
+export const RESULT_FORMAT = { format: 'gfield-result', version: 2 };
 const LOG_KEY = 'exports';
 
 // Короткий отпечаток записи (FNV-1a): меняется при любой правке записи — по нему определяем «изменена после выгрузки»
@@ -31,42 +28,52 @@ export const pendingCount = (work, log) => Array.from(recordStates(work, log).va
 
 const TYPE_RU = { point: 'Новая точка', measure: 'Новый замер', outflow: 'Выход воды' };
 const csvCell = (v) => { const s = v == null ? '' : String(v); return /[";\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
-function toCsv(recs) {
+export function toCsv(recs) {
   const head = ['Тип', 'Правка', '№ точки', 'Родитель', 'X', 'Y', 'Z', 'Дата', 'Исполнитель', 'Статус', 'Дебит л/с', 'Интенсивность', 'Домен', 'Борт', 'Горизонт', 'Цвет воды', 'Метод замера', 'Уровень воды Z', 'Комментарий', 'Фото', 'Создана'];
   const rows = recs.map((r) => { const f = r.fields || {}; return [TYPE_RU[r.type] || r.type, r.edit ? 'да' : '', r.point_number, r.parent_number, r.x, r.y, r.z, f.monitoring_date, f.worker, f.status, f.flow_rate, f.intensity, f.domain, f.wall, f.horizon, f.water_color, f.measure_method, f.water_level_z, f.comment, (r.photos || []).length, r.createdAt]; });
   return '﻿' + [head, ...rows].map((row) => row.map(csvCell).join(';')).join('\r\n');
 }
 
 const p2 = (n) => String(n).padStart(2, '0');
-export function resultFileName(session, now = new Date()) {
+export function resultFileName(session, ext, now = new Date()) {
   const q = String(session.manifest.quarry || 'карьер').replace(/[^\p{L}\p{N}]+/gu, '_'), w = (session.manifest.scheme && session.manifest.scheme.weekKey) || '';
-  return 'Результаты_' + q + (w ? '_' + w : '') + '_' + now.getFullYear() + p2(now.getMonth() + 1) + p2(now.getDate()) + '_' + p2(now.getHours()) + p2(now.getMinutes()) + '.gresult';
+  return 'Результаты_' + q + (w ? '_' + w : '') + '_' + now.getFullYear() + p2(now.getMonth() + 1) + p2(now.getDate()) + '_' + p2(now.getHours()) + p2(now.getMinutes()) + '.' + ext;
 }
 
-// Собирает файл результатов. records — записи, которые выгружаем (по умолчанию — все)
-export async function buildResult({ session, work, password, worker, appVersion, onlyIds }) {
+function blobToDataUrl(blob) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error || new Error('Не удалось прочитать фото')); r.readAsDataURL(blob); }); }
+
+// Собирает файл результатов. onlyIds — выгрузить только эти записи (по умолчанию все)
+export async function buildResult({ session, work, worker, appVersion, onlyIds }) {
   const recs = (work.records || []).filter((r) => !onlyIds || onlyIds.has(r.id));
   if (!recs.length) throw new Error('Нет записей для выгрузки');
-  const files = [], missing = [], seen = new Set();
+  const photos = {}, missing = [];
   for (const r of recs) for (const pid of r.photos || []) {
-    if (seen.has(pid)) continue; seen.add(pid);
+    if (photos[pid]) continue;
     const blob = await getPhoto(pid);
-    if (blob) files.push({ name: 'photos/' + pid + '.jpg', data: blob, store: true }); else missing.push({ record: r.point_number, photo: pid });
+    if (blob) photos[pid] = await blobToDataUrl(blob); else missing.push({ record: r.point_number, photo: pid });
   }
   const m = session.manifest, now = new Date();
-  const manifest = {
-    ...RESULT_FORMAT, createdAt: now.toISOString(), worker: worker || '', appVersion: appVersion || '', device: navigator.userAgent,
-    quarry: m.quarry, weekKey: m.scheme && m.scheme.weekKey,
+  const counts = { records: recs.length, points: recs.filter((r) => r.type === 'point' && !r.edit).length, measures: recs.filter((r) => r.type === 'measure').length, outflows: recs.filter((r) => r.type === 'outflow' && !r.edit).length, edits: recs.filter((r) => r.edit).length, photos: Object.keys(photos).length };
+  const doc = {
+    ...RESULT_FORMAT, createdAt: now.toISOString(), worker: worker || '', appVersion: appVersion || '', quarry: m.quarry, weekKey: m.scheme && m.scheme.weekKey,
     package: { hash: session.fileHash || '', fileName: session.fileName || '', createdAt: m.createdAt, createdBy: m.createdBy || '', importedAt: session.importedAt },
-    counts: { records: recs.length, points: recs.filter((r) => r.type === 'point' && !r.edit).length, measures: recs.filter((r) => r.type === 'measure').length, outflows: recs.filter((r) => r.type === 'outflow' && !r.edit).length, edits: recs.filter((r) => r.edit).length, photos: seen.size - missing.length },
-    missingPhotos: missing,
+    counts, missingPhotos: missing, records: recs, photos,
   };
-  const all = [{ name: 'manifest.json', data: JSON.stringify(manifest, null, 1) }, { name: 'records.json', data: JSON.stringify({ records: recs }, null, 1) }, { name: 'records.csv', data: toCsv(recs) }, ...files];
-  let blob = await zipPack(all);
-  if (password) blob = new Blob([await encryptBytes(new Uint8Array(await blob.arrayBuffer()), password)], { type: 'application/octet-stream' });
-  let hash = ''; try { hash = await sha256Hex(blob); } catch (e) { /* без HTTPS хеш недоступен */ }
+  const blob = new Blob([JSON.stringify(doc)], { type: 'application/json' });
   const fps = {}; recs.forEach((r) => { fps[r.id] = fingerprint(r); });
-  return { blob, manifest, hash, size: blob.size, fileName: resultFileName(session, now), encrypted: !!password, fps, missing };
+  return { blob, doc, counts, size: blob.size, fileName: resultFileName(session, 'json', now), csvName: resultFileName(session, 'csv', now), csv: new Blob([toCsv(recs)], { type: 'text/csv;charset=utf-8' }), fps, missing };
+}
+
+// Читает собранный файл обратно, как это сделает основная платформа: JSON целый, записи и фото на месте
+export async function verifyResult(blob, counts) {
+  try {
+    const d = JSON.parse(await blob.text());
+    if (d.format !== RESULT_FORMAT.format) throw new Error('неверный формат');
+    if (d.records.length !== counts.records) throw new Error('число записей не совпало');
+    if (Object.keys(d.photos).length !== counts.photos) throw new Error('число фото не совпало');
+    for (const v of Object.values(d.photos)) if (!/^data:image\/jpeg;base64,/.test(v) || v.length < 100) throw new Error('фото повреждено');
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.message || String(e) }; }
 }
 
 export function saveBlob(blob, name) {
@@ -75,8 +82,8 @@ export function saveBlob(blob, name) {
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 export function canShareFile(blob, name) {
-  try { return !!(navigator.canShare && navigator.canShare({ files: [new File([blob], name, { type: 'application/octet-stream' })] })); } catch (e) { return false; }
+  try { return !!(navigator.canShare && navigator.canShare({ files: [new File([blob], name, { type: blob.type })] })); } catch (e) { return false; }
 }
 export async function shareFile(blob, name, title) {
-  await navigator.share({ files: [new File([blob], name, { type: 'application/octet-stream' })], title: title || name });
+  await navigator.share({ files: [new File([blob], name, { type: blob.type })], title: title || name });
 }
