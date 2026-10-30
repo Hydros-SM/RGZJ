@@ -74,7 +74,8 @@ export function derivePoints(data, cfg) {
   const interest = data.interest && cfg && cfg.scope !== 'all' ? new Set(data.interest.map(String)) : null;
   const okDate = (p) => !asOf || String(p.monitoring_date || '') <= asOf;
   const parentOf = (p) => String(p.kind === 'outflow' ? p.parent_number : p.point_number);
-  const use = rows.filter((p) => (!interest || interest.has(parentOf(p))) && okDate(p));
+  // выходы воды — постоянные объекты карьера: показываются всегда, независимо от выбора точек интереса
+  const use = rows.filter((p) => (p.kind === 'outflow' || !interest || interest.has(parentOf(p))) && okDate(p));
   const measure = use.filter((p) => p.kind !== 'outflow'), outflows = use.filter((p) => p.kind === 'outflow');
   const latest = new Map(), history = new Map();
   measure.forEach((p) => { const c = latest.get(p.point_number); if (!c || String(p.monitoring_date || '') > String(c.monitoring_date || '')) latest.set(p.point_number, p); });
