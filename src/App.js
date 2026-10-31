@@ -13,7 +13,7 @@ import { PackagePage } from './pages/PackagePage.js';
 import { loadExportLog, pendingCount } from './lib/export.js';
 import { RecordDialog } from './components/RecordDialog.js';
 
-export const APP_VERSION = 'v0.5.4 (выходы воды показываются всегда)';
+export const APP_VERSION = 'v0.6.0 (ортофотоплан и тепловизор в 3D, размер и цвет точек)';
 const TABS = [['map', 'Карта', MapIcon], ['points', 'Список точек', ListChecks], ['model', 'Модель', Box], ['records', 'Записи', ClipboardList], ['package', 'Пакет', PackageOpen]];
 const DEFAULT_FLOW = { mode: 'direct', unit: 'ls', value: '', volume: '', time: '' };
 const r2 = (v) => Math.round(v * 100) / 100;

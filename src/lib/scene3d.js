@@ -7,8 +7,9 @@ import { FAULT_GROUP_COLORS, WATER_CLASS_COLORS } from './faults-format.js';
 export const LAYERS_3D = [
   ['terrain', 'Рельеф'], ['contours', 'Горизонты (изолинии с отметками)'], ['faultSurf', 'Разломы под рельефом'], ['faultAir', 'Разломы выше рельефа'], ['faultLines', 'Разломы (линии выхода)'], ['points', 'Точки замера'], ['outflows', 'Выходы воды'],
   ['piezo', 'Пьезометры'], ['sensors', 'Датчики'], ['observation', 'Наблюдательные скважины'], ['horizontal', 'Горизонтальные скважины'],
+  ['uavPhoto', 'Ортофотоплан / фотомодель (БПЛА)'], ['uavThermal', 'Тепловизионная съёмка (БПЛА)'],
 ];
-export const DEFAULT_LAYERS_3D = { terrain: true, contours: true, faultSurf: true, faultAir: false, faultLines: true, points: true, outflows: true, piezo: true, sensors: true, observation: true, horizontal: true };
+export const DEFAULT_LAYERS_3D = { terrain: true, contours: true, faultSurf: true, faultAir: false, faultLines: true, points: true, outflows: true, piezo: true, sensors: true, observation: true, horizontal: true, uavPhoto: true, uavThermal: true };
 
 function circleTexture(THREE, color) {
   const c = document.createElement('canvas'); c.width = c.height = 64;
@@ -24,7 +25,8 @@ function diamondTexture(THREE, color) {
 }
 
 // Возвращает { group, markers, center, radius, layerGroups, terrainMesh, zAt(X, Y) }
-export function buildScene(THREE, session) {
+export function buildScene(THREE, session, pts0) {
+  let pts = pts0 || { sizeP: 1, sizeO: 1, colorMode: 'status', colorP: '#1a73e8', colorO: '#0e7490' }; // стиль точек замера и выходов воды (размер, цвет)
   const T = session.terrain, S = session.sampler, D = session.data;
   const bb = T.robustBBox || T.bbox;
   const cx = (bb.xMin + bb.xMax) / 2, cy = (bb.yMin + bb.yMax) / 2, cz = (bb.zMin + bb.zMax) / 2;
@@ -100,10 +102,11 @@ export function buildScene(THREE, session) {
   const white = circleTexture(THREE, '#ffffff'), dia = diamondTexture(THREE, '#ffffff');
   // точки замера и выходы воды (в том числе созданные в поле — фиолетовые): пересоздаются при изменении записей без перестройки рельефа
   const buildPoints = (sess) => {
-    pointsLayer('points', sess.points.filter((p) => p.x_local != null).map((p) => ({ v: v3(p.x_local, p.y_local, zAt(p.x_local, p.y_local) + 2), color: p._field ? '#7c3aed' : (STATUS_COLORS[p.status] || '#666666'), p })), white, 16, (it) => ({ kind: 'point', item: it.p }));
-    pointsLayer('outflows', sess.outflows.filter((o) => o.x_local != null).map((o) => ({ v: v3(o.x_local, o.y_local, (o.water_level_z != null ? Number(o.water_level_z) : zAt(o.x_local, o.y_local)) + 1.5), color: o._field ? '#7c3aed' : (o.status === 'Пересохла' ? '#8a8f98' : '#0e7490'), o })), dia, 15, (it) => ({ kind: 'outflow', item: it.o }));
+    pointsLayer('points', sess.points.filter((p) => p.x_local != null).map((p) => ({ v: v3(p.x_local, p.y_local, zAt(p.x_local, p.y_local) + 2), color: p._field ? '#7c3aed' : (pts.colorMode === 'custom' ? pts.colorP : (STATUS_COLORS[p.status] || '#666666')), p })), white, 16 * (pts.sizeP || 1), (it) => ({ kind: 'point', item: it.p }));
+    pointsLayer('outflows', sess.outflows.filter((o) => o.x_local != null).map((o) => ({ v: v3(o.x_local, o.y_local, (o.water_level_z != null ? Number(o.water_level_z) : zAt(o.x_local, o.y_local)) + 1.5), color: o._field ? '#7c3aed' : (pts.colorMode === 'custom' ? pts.colorO : (o.status === 'Пересохла' ? '#8a8f98' : '#0e7490')), o })), dia, 15 * (pts.sizeO || 1), (it) => ({ kind: 'outflow', item: it.o }));
   };
-  const refreshPoints = (sess) => {
+  const refreshPoints = (sess, ptsNew) => {
+    if (ptsNew) pts = ptsNew;
     ['points', 'outflows'].forEach((k) => { const g = layerGroups[k]; if (g) { g.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); }); group.remove(g); delete layerGroups[k]; } });
     for (let i = markers.length - 1; i >= 0; i--) if (markers[i].layer === 'points' || markers[i].layer === 'outflows') markers.splice(i, 1);
     buildPoints(sess);

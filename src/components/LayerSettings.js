@@ -14,9 +14,20 @@ export function PointsSettings({ open, onClose, session, vs: view, setVs: setVie
   const dates = useMemo(() => Array.from(new Set(rows.filter((p) => p.kind !== 'outflow').map((p) => String(p.monitoring_date || '').slice(0, 10)).filter(Boolean))).sort(), [rows]);
   const nAll = useMemo(() => new Set(rows.filter((p) => p.kind !== 'outflow').map((p) => p.point_number)).size, [rows]);
   const set = (patch) => setView({ ...view, points: { ...cfg, ...patch } });
+  const pts = view.pts, setPts = (patch) => setView({ ...view, pts: { ...pts, ...patch } });
   const per = D.period && D.period.mode !== 'all' ? 'С ' + fmtDate(D.period.from) + (D.period.to ? ' по ' + fmtDate(D.period.to) : '') + ' (последний замер каждой точки сохранён)' : 'весь период';
   return html`
-    <${Dialog} open=${open} onClose=${onClose} title="Настройки слоя «Точки замера»" width="min(560px, 96vw)" footer=${html`<${Button} variant="outline" onClick=${() => set({ scope: 'interest', asOf: '' })}>Сбросить<//><${Button} onClick=${onClose}>Готово<//>`}>
+    <${Dialog} open=${open} onClose=${onClose} title="Настройки слоя «Точки замера»" width="min(560px, 96vw)" footer=${html`<${Button} variant="outline" onClick=${() => setView({ ...view, points: { ...cfg, scope: 'interest', asOf: '' }, pts: { sizeP: 1, sizeO: 1, colorMode: 'status', colorP: '#1a73e8', colorO: '#0e7490' } })}>Сбросить<//><${Button} onClick=${onClose}>Готово<//>`}>
+      <div class="ls-block">
+        <b>Размер и цвет точек</b>
+        <${Row}><span class="ls-lbl">Точки замера</span><input type="range" min="0.5" max="3" step="0.1" value=${pts.sizeP} onInput=${(e) => setPts({ sizeP: Number(e.target.value) })} /><b>×${pts.sizeP.toFixed(1)}</b><//>
+        <${Row}><span class="ls-lbl">Выходы воды</span><input type="range" min="0.5" max="3" step="0.1" value=${pts.sizeO} onInput=${(e) => setPts({ sizeO: Number(e.target.value) })} /><b>×${pts.sizeO.toFixed(1)}</b><//>
+        <label class="ls-opt"><input type="radio" name="ptcol" checked=${pts.colorMode !== 'custom'} onChange=${() => setPts({ colorMode: 'status' })} /> Цвет точек замера — по статусу (активная, иссякает, пересохла…)</label>
+        <label class="ls-opt"><input type="radio" name="ptcol" checked=${pts.colorMode === 'custom'} onChange=${() => setPts({ colorMode: 'custom' })} /> Свои цвета</label>
+        <${Row}><span class="ls-lbl">Точки замера</span><input type="color" value=${pts.colorP} disabled=${pts.colorMode !== 'custom'} onInput=${(e) => setPts({ colorP: e.target.value })} />${['#1a73e8', '#e11d48', '#f59e0b', '#16a34a', '#ffffff', '#111827'].map((c) => html`<button key=${c} class="ls-sw" style=${{ background: c }} onClick=${() => setPts({ colorMode: 'custom', colorP: c })} title=${c}></button>`)}<//>
+        <${Row}><span class="ls-lbl">Выходы воды</span><input type="color" value=${pts.colorO} disabled=${pts.colorMode !== 'custom'} onInput=${(e) => setPts({ colorO: e.target.value })} />${['#0e7490', '#06b6d4', '#2563eb', '#f59e0b', '#ffffff', '#111827'].map((c) => html`<button key=${c} class="ls-sw" style=${{ background: c }} onClick=${() => setPts({ colorMode: 'custom', colorO: c })} title=${c}></button>`)}<//>
+        <div class="ls-hint">Размер и цвет действуют на плане, на карте и в 3D. Записи, созданные в поле, остаются фиолетовыми, чтобы их было видно. На тёмной съёмке (ортофото, тепловизор) удобны светлые цвета.</div>
+      </div>
       <div class="ls-block">
         <b>Какие точки показывать</b>
         <label class="ls-opt"><input type="radio" name="scope" checked=${cfg.scope !== 'all' || !hasInterest} onChange=${() => set({ scope: 'interest' })} /> ${hasInterest ? 'Точки интереса — выбранные при подготовке пакета (' + D.interest.length + ')' : 'Все точки пакета (' + nAll + ')'}</label>

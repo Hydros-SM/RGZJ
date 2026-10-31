@@ -4,13 +4,14 @@ import { styleTerrain } from '../lib/terrain3d.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { html } from '../lib/html.js';
 import { buildScene } from '../lib/scene3d.js';
+import { buildUavMesh } from '../lib/uav3d.js';
 
 const visKey = (k) => k.replace(/C$/, '');
 
-export function Scene3D({ session, fview, tview, onReady, layers, vexag, terrainOp = 0.6, selected, onPick, focus, viewCmd, placing, onPlace }) {
+export function Scene3D({ session, fview, tview, pts, uav, onReady, layers, vexag, terrainOp = 0.6, selected, onPick, focus, viewCmd, placing, onPlace }) {
   const wrapRef = useRef(null);
   const S = useRef({});
-  const props = useRef({}); props.current = { session, fview, tview, layers, vexag, terrainOp, selected, onPick, placing, onPlace };
+  const props = useRef({}); props.current = { session, fview, tview, pts, uav, layers, vexag, terrainOp, selected, onPick, placing, onPlace };
   const [state, setState] = useState('loading'); // loading | ready | error
   const [errMsg, setErrMsg] = useState('');
 
@@ -19,9 +20,31 @@ export function Scene3D({ session, fview, tview, onReady, layers, vexag, terrain
     const s = S.current; if (!s.B) return;
     Object.keys(s.B.layerGroups).forEach((k) => { s.B.layerGroups[k].visible = props.current.layers[visKey(k)] !== false; });
     s.B.group.scale.set(1, props.current.vexag || 1, 1);
+    // съёмки БПЛА: слой включается галочкой; фотомодель может заменять рельеф схемы (тогда он скрыт)
+    const U = props.current.uav || {}, um = s.uavMesh || {};
+    ['photo', 'thermal'].forEach((k) => { if (um[k]) { um[k].visible = props.current.layers[k === 'photo' ? 'uavPhoto' : 'uavThermal'] !== false; if (um[k].material) { const op = (U[k] && U[k].opacity != null) ? U[k].opacity : 1; um[k].material.opacity = op; um[k].material.transparent = op < 0.99; } } });
+    if (um.photo && um.photo.visible && U.photo && U.photo.replace && s.B.layerGroups.terrain) s.B.layerGroups.terrain.visible = false;
     const op = props.current.terrainOp, tm = s.B.terrainMesh.material; // полупрозрачный рельеф: разломы и скважины под ним видны; не пишем глубину, чтобы они рисовались сквозь него
     tm.transparent = op < 0.99; tm.opacity = op; tm.depthWrite = op >= 0.99; tm.needsUpdate = true; s.B.terrainMesh.renderOrder = 1; s.B.faultMeshes.forEach((m) => { m.renderOrder = 2; });
     render();
+  }
+  // загрузка/замена сеток съёмок БПЛА при смене выбранной съёмки
+  async function syncUav() {
+    const s = S.current; if (!s.B) return;
+    s.uavMesh = s.uavMesh || {}; s.uavData = s.uavData || {}; s.uavTok = s.uavTok || {};
+    for (const k of ['photo', 'thermal']) {
+      const cfg = (props.current.uav || {})[k], data = cfg && cfg.data ? cfg.data : null;
+      if (s.uavData[k] === data) continue;
+      s.uavData[k] = data; const tok = (s.uavTok[k] = (s.uavTok[k] || 0) + 1);
+      if (s.uavMesh[k]) { s.B.group.remove(s.uavMesh[k]); s.uavMesh[k].geometry.dispose(); s.uavMesh[k].material.map && s.uavMesh[k].material.map.dispose(); s.uavMesh[k].material.dispose(); s.uavMesh[k] = null; }
+      if (!data) continue;
+      try {
+        const mesh = await buildUavMesh(s.THREE, s.B, data, { opacity: cfg.opacity != null ? cfg.opacity : 1, thermal: k === 'thermal' });
+        if (!S.current.B || S.current.uavTok[k] !== tok) { mesh.geometry.dispose(); mesh.material.dispose(); continue; }
+        s.uavMesh[k] = mesh; s.B.group.add(mesh);
+      } catch (e) { console.error(e); props.current.uav[k].onError && props.current.uav[k].onError(String(e.message || e)); }
+    }
+    applyLayers();
   }
   function applyTerrain() {
     const s = S.current; if (!s.B) return;
@@ -65,7 +88,7 @@ export function Scene3D({ session, fview, tview, onReady, layers, vexag, terrain
         renderer.setClearColor(0xdfe3e8); wrap.appendChild(renderer.domElement); renderer.domElement.style.touchAction = 'none'; renderer.domElement.className = 'scene3d-canvas';
         const scene = new THREE.Scene();
         scene.add(new THREE.AmbientLight(0xffffff, 0.7)); const sun = new THREE.DirectionalLight(0xffffff, 0.8); sun.position.set(0.6, 1, 0.8); scene.add(sun);
-        const B = buildScene(THREE, props.current.session); scene.add(B.group);
+        const B = buildScene(THREE, props.current.session, props.current.pts); scene.add(B.group);
         const camera = new THREE.PerspectiveCamera(45, W / H, 1, B.radius * 30);
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = false; controls.maxPolarAngle = Math.PI * 0.495; controls.screenSpacePanning = true;
@@ -110,7 +133,7 @@ export function Scene3D({ session, fview, tview, onReady, layers, vexag, terrain
           }
           P.onPick && P.onPick(null);
         });
-        applyLayers(); applySelection(); setState('ready'); applyTerrain(); loadMapTexture();
+        applyLayers(); applySelection(); setState('ready'); applyTerrain(); loadMapTexture(); syncUav();
         onReady && onReady();
       } catch (e) {
         console.error(e);
@@ -125,9 +148,10 @@ export function Scene3D({ session, fview, tview, onReady, layers, vexag, terrain
     };
   }, [session.rec]);
 
-  useEffect(() => { const s = S.current; if (s.B && s.B.refreshPoints) { s.B.refreshPoints(session); applyLayers(); applySelection(); } }, [session.points, session.outflows]);
+  useEffect(() => { const s = S.current; if (s.B && s.B.refreshPoints) { s.B.refreshPoints(session, pts); applyLayers(); applySelection(); } }, [session.points, session.outflows, pts && pts.sizeP, pts && pts.sizeO, pts && pts.colorMode, pts && pts.colorP, pts && pts.colorO]);
+  useEffect(() => { syncUav(); }, [uav && uav.photo && uav.photo.data, uav && uav.thermal && uav.thermal.data]);
   useEffect(() => { applyTerrain(); }, [tview && tview.colorMode, tview && tview.flat, tview && tview.step, tview && tview.labels, layers.contours]);
-  useEffect(() => { applyLayers(); }, [layers, vexag, terrainOp]);
+  useEffect(() => { applyLayers(); }, [layers, vexag, terrainOp, uav && uav.photo && uav.photo.opacity, uav && uav.photo && uav.photo.replace, uav && uav.thermal && uav.thermal.opacity]);
   useEffect(() => { applySelection(); }, [selected, fview]);
   useEffect(() => {
     const s = S.current; if (!s.B || !viewCmd) return;

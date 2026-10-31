@@ -9,6 +9,8 @@ import { PlanCanvas } from '../components/PlanCanvas.js';
 import { Scene3D } from '../components/Scene3D.js';
 import { InfoSheet } from '../components/InfoSheet.js';
 import { PointsSettings, FaultsSettings, TerrainSettings, PoiSettings } from '../components/LayerSettings.js';
+import { UavSettings } from '../components/UavSettings.js';
+import { listScans, loadScan } from '../lib/uav-store.js';
 import { computePoi } from '../lib/session.js';
 
 function useImage(url) {
@@ -25,7 +27,7 @@ const ls = (key, def) => { try { return { ...def, ...JSON.parse(localStorage.get
 const lsSet = (key, v) => { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) { /* не критично */ } };
 
 // mode: 'map' | 'model'
-const GEAR = { points: 'points', poi: 'poi', outflows: 'points', faults2d: 'faults', faults3d: 'faults', faultSurf: 'faults', faultAir: 'faults', faultLines: 'faults', terrain: 'terrain', contours: 'terrain' };
+const GEAR = { points: 'points', poi: 'poi', outflows: 'points', faults2d: 'faults', faults3d: 'faults', faultSurf: 'faults', faultAir: 'faults', faultLines: 'faults', terrain: 'terrain', contours: 'terrain', uavPhoto: 'uavPhoto', uavThermal: 'uavThermal' };
 
 export function PlanPage({ session, mode, focusRequest, placing, onStart, onPlace, onCancelPlace, vs, setVs, onReady }) {
   const [layers, setLayers] = useState(() => ls('field-layers-' + mode, mode === 'map' ? { ...DEFAULT_LAYERS, faults2d: true, faults3d: false } : DEFAULT_LAYERS));
@@ -41,6 +43,24 @@ export function PlanPage({ session, mode, focusRequest, placing, onStart, onPlac
   const [hint, setHint] = useState('');
   const [dlg, setDlg] = useState('');
   const is3d = mode === 'model' && view === '3d';
+  // съёмки БПЛА: список на устройстве и выбранные, загруженные в память (фото, тепловизор)
+  const [scans, setScans] = useState([]);
+  const [uavData, setUavData] = useState({ photo: null, thermal: null });
+  const [uavErr, setUavErr] = useState('');
+  const reloadScans = async () => { try { setScans(await listScans()); } catch (e) { setScans([]); } };
+  useEffect(() => { reloadScans(); }, []);
+  useEffect(() => {
+    if (!is3d) return undefined;
+    let off = false;
+    ['photo', 'thermal'].forEach((k) => {
+      const id = vs.uav[k].id;
+      if (!id) { setUavData((d) => (d[k] ? { ...d, [k]: null } : d)); return; }
+      if (uavData[k] && uavData[k].id === id) return;
+      loadScan(id).then((data) => { if (!off) setUavData((d) => ({ ...d, [k]: { id, ...data } })); }).catch((e) => { if (!off) { setUavErr(String(e.message || e)); setUavData((d) => ({ ...d, [k]: null })); } });
+    });
+    return () => { off = true; };
+  }, [is3d, vs.uav.photo.id, vs.uav.thermal.id, scans]);
+  const uavProp = { photo: { data: uavData.photo, opacity: vs.uav.photo.opacity, replace: vs.uav.photo.replace }, thermal: { data: uavData.thermal, opacity: vs.uav.thermal.opacity } };
   const [loading3d, setLoading3d] = useState(false);
   const handleReady = () => { setLoading3d(false); onReady && onReady(); };
   useEffect(() => { if (is3d) setLoading3d(true); else { const t = setTimeout(handleReady, 0); return () => clearTimeout(t); } return undefined; }, [is3d]);
@@ -66,7 +86,7 @@ export function PlanPage({ session, mode, focusRequest, placing, onStart, onPlac
     return fresh && fresh !== it ? { ...selected, item: fresh } : selected;
   }, [selected, session.points, session.outflows]);
   const poi = useMemo(() => (mode === 'map' || !is3d ? computePoi(session, vs.poi) : null), [session.data, session.points, session.manifest, vs.poi, mode, is3d]);
-  const overlay = { poi, data: session.data, layers, points: session.points, outflows: session.outflows, traces: session.traces, faults: session.faults, fview: vs.faults, selected: live };
+  const overlay = { poi, pts: vs.pts, data: session.data, layers, points: session.points, outflows: session.outflows, traces: session.traces, faults: session.faults, fview: vs.faults, selected: live };
   const select = (p) => {
     if (!p) { setSelected(null); return; }
     if (p.kind === 'fault') setSelected({ kind: 'fault', key: p.key });
@@ -79,7 +99,7 @@ export function PlanPage({ session, mode, focusRequest, placing, onStart, onPlac
   return html`
     <div class="plan-page">
       ${loading3d && html`<div class="progress"><i /></div><div class="progress-msg">Строю 3D-модель…</div>`}
-      ${is3d ? html`<${Scene3D} session=${session} fview=${vs.faults} tview=${vs.terrain} onReady=${handleReady} layers=${layers3d} vexag=${vexag} terrainOp=${terrainOp} selected=${live} onPick=${select} focus=${focus} viewCmd=${viewCmd} placing=${!!placing} onPlace=${onPlace} />`
+      ${is3d ? html`<${Scene3D} session=${session} fview=${vs.faults} tview=${vs.terrain} pts=${vs.pts} uav=${uavProp} onReady=${handleReady} layers=${layers3d} vexag=${vexag} terrainOp=${terrainOp} selected=${live} onPick=${select} focus=${focus} viewCmd=${viewCmd} placing=${!!placing} onPlace=${onPlace} />`
         : html`<${PlanCanvas} base=${base} overlay=${overlay} onPick=${select} focus=${focus} placing=${!!placing} onPlace=${onPlace} />`}
       ${mode === 'model' && html`<div class="view-switch">
         <button class=${view === 'plan' ? 'on' : ''} onClick=${() => setView('plan')}>План</button>
@@ -107,6 +127,9 @@ export function PlanPage({ session, mode, focusRequest, placing, onStart, onPlac
       ${!is3d && layers.poi && poi && html`<div class="poi-badge" title="Точки интереса: перемерено / всего">✓ ${poi.doneCount} / ${poi.total}</div>`}
       <${PointsSettings} open=${dlg === 'points'} onClose=${() => setDlg('')} session=${session} vs=${vs} setVs=${setVs} />
       <${TerrainSettings} open=${dlg === 'terrain'} onClose=${() => setDlg('')} session=${session} vs=${vs} setVs=${setVs} />
+      <${UavSettings} open=${dlg === 'uavPhoto'} onClose=${() => setDlg('')} kind="photo" vs=${vs} setVs=${setVs} scans=${scans} reload=${reloadScans} />
+      <${UavSettings} open=${dlg === 'uavThermal'} onClose=${() => setDlg('')} kind="thermal" vs=${vs} setVs=${setVs} scans=${scans} reload=${reloadScans} />
+      ${uavErr && html`<div class="placing-banner"><span>${uavErr}</span><button class="btn btn-ghost" onClick=${() => setUavErr('')}><${X} size=${16} /></button></div>`}
       <${FaultsSettings} open=${dlg === 'faults'} onClose=${() => setDlg('')} session=${session} vs=${vs} setVs=${setVs} />
       <${InfoSheet} session=${session} selected=${live} onClose=${() => setSelected(null)} onSelect=${setSelected} onAction=${onStart} />
     </div>`;
